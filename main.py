@@ -27,6 +27,9 @@ class Graph2Vec(object):
                     G[u][v]['weight'] = w
         self.graph = G
 
+    def read_graphml(self, filename):
+        return nx.read_graphml(filename)
+
     def create_random_walk_graph(self):
         '''Creates a probabilistic graph from graph with weights.'''
         if self.graph is None:
@@ -212,6 +215,11 @@ class GraphKernel(object):
         else:
             raise ValueError, \
                 "Wrong method for Graph Kernel.\n You should choose between {} methods".format(', '.join(self.__methods))
+
+    def read_graphs(self, filenames = None, folder = None, ext = None):
+        pass
+    def kernel_matrix(self, ):
+        pass
 
 
 if __name__ == '__main__':
