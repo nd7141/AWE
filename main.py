@@ -1,11 +1,12 @@
 import networkx as nx
-import random, time
+import random, time, math
 
 class Graph2Vec(object):
     def __init__(self, G = None, RW = None):
         self.graph = G
         self.rw_graph = RW
         self.paths = dict()
+        self.__methods = ['sampling', 'exact']
 
     def read_graph_from_text(self, filename, header = True, weights = True, sep = ',', directed = False):
         '''Read from Text Files.'''
@@ -53,6 +54,23 @@ class Graph2Vec(object):
                 last_step_paths = current_step_paths
             self.paths[steps] = paths
 
+    def walk2pattern(self, walk):
+        '''Converts a walk with arbitrary nodes to meta-walk.'''
+        idx = 0
+        pattern = []
+        d = dict()
+        for node in walk:
+            if node not in d:
+                d[node] = idx
+                idx += 1
+            pattern.append(d[node])
+        return tuple(pattern)
+
+    def n_samples(self, steps, delta, eps):
+        a = len(self.paths[steps])
+        estimation = 2*(math.log(2)*a + math.log(1./delta))/eps**2
+        return int(estimation) + 1
+
     def _random_step_node(self, node):
         '''Moves one step from the current according to probabilities of outgoing edges.
         Return next node.'''
@@ -82,65 +100,98 @@ class Graph2Vec(object):
             node = v
         return tuple(walk)
 
-    # TODO: Optimize function by not running multiple walks for the same node
-    def random_walks(self, steps, M, prop=True):
+    def _sampling(self, steps, M, prop=True):
+        '''Find vector representation using sampling method.
+        Run M random walks with n steps for each node in the graph.
+        steps is the number of steps.
+        M is the number of iterations.
+        Returns dictionary pattern to probability.
+        '''
         walks = dict()
         N = len(self.rw_graph)
         for node in self.rw_graph:
             for it in range(M):
-                for s in range(2, steps + 1):
-                    w = self._random_walk_node(node, s)
+                # run a random walk with n steps, and then look at sub-walks
+                w = self._random_walk_node(node, steps)
+                for length in range(3, len(w) + 1):
+                    w_cropped = w[:length]
                     amount = 1.
                     if prop:
                         amount /= (N * M)
-                    if w not in walks:
-                        walks[w] = amount
+                    if w_cropped not in walks:
+                        walks[w_cropped] = amount
                     else:
-                        walks[w] += amount
+                        walks[w_cropped] += amount
+
         return walks
 
-    # TODO: Replace _sampling function with content of random_walk function
-    def _sampling(self, steps, M):
-        '''Find vector represesntation using sampling method.
-        steps is the number of steps.
-        M is the number of iterations.
-        Returns dictionary pattern to probability.'''
-        patterns = dict()
-        for _ in range(M):
-            u = random.choice(self.rw_graph.nodes())
-            walk = self._random_walk_node(u, steps)
-            patterns[walk] = patterns.get(walk, 0) + 1. / M
-        return patterns
+    def _exact(self, steps):
+        '''Find vector representation using exact method.
+            Calculates probabilities from each node to all other nodes within n steps.
+            Running time is the O(# number of random walks) <= O(n*d_max^steps).
+            steps is the number of steps.
+            Returns dictionary pattern to probability.
+        '''
+        walks = dict()
+        all_walks = []
 
-    def run(self, method = 'sampling', steps = None, M = None):
+        def patterns(RW, node, steps, walks, current_walk=None, current_dist=1.):
+            if current_walk is None:
+                current_walk = [node]
+            if len(current_walk) > 2:  # walks with more than 1 edge
+                all_walks.append(current_walk)
+                walks[self.walk2pattern(current_walk)] = walks.get(self.walk2pattern(current_walk), 0) \
+                                                         + current_dist / len(RW)
+            if steps > 0:
+                for v in RW[node]:
+                    patterns(RW, v, steps - 1, walks, current_walk + [v], current_dist * RW[node][v]['weight'])
+
+        for node in self.rw_graph:
+            patterns(self.rw_graph, node, steps, walks)
+        print 'Total walks of size {} in a graph:'.format(steps), len(all_walks)
+        return walks
+
+    def run(self, method = 'sampling', steps = None, M = None, delta = 0.1, eps = 0.1):
         '''Generic function to get vector representation.
+        method can be sampling, exact
         steps is the number of steps.
         M is the number of iterations.
+        delta is probability devitation from the true distribution of meta-walks
+        eps is absolute value for deviation of first norm
         Return vector and meta information as dictionary.'''
         if self.rw_graph is None:
             self.create_random_walk_graph()
 
+        if steps is None:
+            steps = 5
+            print("Use default number of steps = {}".format(steps))
+
+        self._all_paths(steps)
+
         if method == 'sampling':
             print("Use sampling method to get vector representation.")
-            if steps is None:
-                steps = 5
-                print("Use default number of steps = {}".format(steps))
             if M is None:
-                M = 500
-                print("Use default number of iterations = {}".format(M))
+                M = self.n_samples(steps, delta, eps)
+                print("Use number of iterations = {} for delta = {} and eps = {}".format(M, delta, eps))
             start = time.time()
-            patterns = self.random_walks(steps, M)
+            patterns = self._sampling(steps, M)
             finish = time.time()
             print('Spent {} sec to get vector representation via sampling method.'.format(round(finish - start, 2)))
+        elif method == 'exact':
+            print("Use exact method to get vector representation.")
+            start = time.time()
+            patterns = self._exact(steps)
+            finish = time.time()
+            print('Spent {} sec to get vector representation via exact method.'.format(round(finish - start, 2)))
+        else:
+            raise ValueError, "You should choose between {} methods".format(', '.join(self.__methods))
 
-            self._all_paths(steps)
-            vector = []
-            print patterns
-            for path in self.paths[steps]:
-                vector.append(patterns.get(tuple(path), 0))
-            return vector, {'meta-paths':self.paths[steps]}
 
-
+        vector = []
+        print patterns
+        for path in self.paths[steps]:
+            vector.append(patterns.get(tuple(path), 0))
+        return vector, {'meta-paths':self.paths[steps]}
 
 
 if __name__ == '__main__':
@@ -150,5 +201,7 @@ if __name__ == '__main__':
 
     G = nx.read_graphml(filename)
     gv = Graph2Vec(G = G)
-    print gv.run(steps = STEPS, M = M)
+    gv.create_random_walk_graph()
+    gv._all_paths(STEPS)
+    print gv.run(method = 'exact', steps=STEPS)
 
