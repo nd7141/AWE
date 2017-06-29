@@ -1,5 +1,6 @@
 import networkx as nx
 import random, time, math
+import numpy as np
 
 class Graph2Vec(object):
     def __init__(self, G = None, RW = None):
@@ -184,7 +185,8 @@ class Graph2Vec(object):
             finish = time.time()
             print('Spent {} sec to get vector representation via exact method.'.format(round(finish - start, 2)))
         else:
-            raise ValueError, "You should choose between {} methods".format(', '.join(self.__methods))
+            raise ValueError, \
+                "Wrong method for Graph2Vec.\n You should choose between {} methods".format(', '.join(self.__methods))
 
 
         vector = []
@@ -192,6 +194,24 @@ class Graph2Vec(object):
         for path in self.paths[steps]:
             vector.append(patterns.get(tuple(path), 0))
         return vector, {'meta-paths':self.paths[steps]}
+
+class GraphKernel(object):
+    def __init__(self):
+        self.gv = Graph2Vec()
+        self.__methods = ['dot', 'rbf']
+
+    def run(self, G1, G2, method = 'dot', sigma = 1, graph2vec_method = 'exact', steps = 3):
+        self.gv.graph = G1
+        v1, d1 = self.gv.run(graph2vec_method, steps = steps)
+        self.gv.graph = G2
+        v2, d2 = self.gv.run(graph2vec_method, steps = steps)
+        if method == 'dot':
+            return np.array(v1).dot(v2)
+        elif method == 'rbf':
+            return np.exp(-np.linalg.norm(np.array(v1) - v2) ** 2 / sigma)
+        else:
+            raise ValueError, \
+                "Wrong method for Graph Kernel.\n You should choose between {} methods".format(', '.join(self.__methods))
 
 
 if __name__ == '__main__':
@@ -201,7 +221,8 @@ if __name__ == '__main__':
 
     G = nx.read_graphml(filename)
     gv = Graph2Vec(G = G)
-    gv.create_random_walk_graph()
-    gv._all_paths(STEPS)
     print gv.run(method = 'exact', steps=STEPS)
 
+    gk = GraphKernel()
+    print gk.run(G, G)
+    print gk.run(G, G, method='rbf')
