@@ -1,13 +1,23 @@
 import networkx as nx
-import random, time, math
+import random, time, math, os
 import numpy as np
 
 class Graph2Vec(object):
     def __init__(self, G = None, RW = None):
-        self.graph = G
+        self._graph = G
         self.rw_graph = RW
         self.paths = dict()
         self.__methods = ['sampling', 'exact']
+
+    @property
+    def graph(self):
+        return self._graph
+
+    @graph.setter
+    def graph(self, G):
+        self._graph = G
+        self.create_random_walk_graph()
+
 
     def read_graph_from_text(self, filename, header = True, weights = True, sep = ',', directed = False):
         '''Read from Text Files.'''
@@ -35,12 +45,18 @@ class Graph2Vec(object):
         if self.graph is None:
             raise ValueError, "You should first create a weighted graph."
 
+        # get name of the label on graph edges (assume all label names are the same)
+        label_name = 'weight'
+        for e in self.graph.edges_iter(data=True):
+            label_name = e[2].keys()[0]
+            break
+
         RW = nx.DiGraph()
         for node in self.graph:
             edges = self.graph[node]
-            total = float(sum([edges[v]['weight'] for v in edges]))
+            total = float(sum([edges[v][label_name] for v in edges]))
             for v in edges:
-                RW.add_edge(node, v, {'weight': edges[v]['weight'] / total})
+                RW.add_edge(node, v, {'weight': edges[v][label_name] / total})
         self.rw_graph = RW
 
     def _all_paths(self, steps):
@@ -129,7 +145,7 @@ class Graph2Vec(object):
 
         return walks
 
-    def _exact(self, steps):
+    def _exact(self, steps, verbose = True):
         '''Find vector representation using exact method.
             Calculates probabilities from each node to all other nodes within n steps.
             Running time is the O(# number of random walks) <= O(n*d_max^steps).
@@ -152,10 +168,11 @@ class Graph2Vec(object):
 
         for node in self.rw_graph:
             patterns(self.rw_graph, node, steps, walks)
-        print 'Total walks of size {} in a graph:'.format(steps), len(all_walks)
+        if verbose:
+            print('Total walks of size {} in a graph:'.format(steps), len(all_walks))
         return walks
 
-    def run(self, method = 'sampling', steps = None, M = None, delta = 0.1, eps = 0.1):
+    def embed(self, method = 'sampling', steps = None, M = None, delta = 0.1, eps = 0.1, verbose = True):
         '''Generic function to get vector representation.
         method can be sampling, exact
         steps is the number of steps.
@@ -168,32 +185,39 @@ class Graph2Vec(object):
 
         if steps is None:
             steps = 5
-            print("Use default number of steps = {}".format(steps))
+            if verbose:
+                print("Use default number of steps = {}".format(steps))
 
         self._all_paths(steps)
 
         if method == 'sampling':
-            print("Use sampling method to get vector representation.")
+            if verbose:
+                print("Use sampling method to get vector representation.")
             if M is None:
                 M = self.n_samples(steps, delta, eps)
-                print("Use number of iterations = {} for delta = {} and eps = {}".format(M, delta, eps))
+                if verbose:
+                    print("Use number of iterations = {} for delta = {} and eps = {}".format(M, delta, eps))
             start = time.time()
             patterns = self._sampling(steps, M)
             finish = time.time()
-            print('Spent {} sec to get vector representation via sampling method.'.format(round(finish - start, 2)))
+            if verbose:
+                print('Spent {} sec to get vector representation via sampling method.'.format(round(finish - start, 2)))
         elif method == 'exact':
-            print("Use exact method to get vector representation.")
+            if verbose:
+                print("Use exact method to get vector representation.")
             start = time.time()
-            patterns = self._exact(steps)
+            patterns = self._exact(steps, verbose=verbose)
             finish = time.time()
-            print('Spent {} sec to get vector representation via exact method.'.format(round(finish - start, 2)))
+            if verbose:
+                print('Spent {} sec to get vector representation via exact method.'.format(round(finish - start, 2)))
         else:
             raise ValueError, \
                 "Wrong method for Graph2Vec.\n You should choose between {} methods".format(', '.join(self.__methods))
 
 
         vector = []
-        print patterns
+        if verbose:
+            print patterns
         for path in self.paths[steps]:
             vector.append(patterns.get(tuple(path), 0))
         return vector, {'meta-paths':self.paths[steps]}
@@ -205,9 +229,9 @@ class GraphKernel(object):
 
     def run(self, G1, G2, method = 'dot', sigma = 1, graph2vec_method = 'exact', steps = 3):
         self.gv.graph = G1
-        v1, d1 = self.gv.run(graph2vec_method, steps = steps)
+        v1, d1 = self.gv.embed(graph2vec_method, steps = steps)
         self.gv.graph = G2
-        v2, d2 = self.gv.run(graph2vec_method, steps = steps)
+        v2, d2 = self.gv.embed(graph2vec_method, steps = steps)
         if method == 'dot':
             return np.array(v1).dot(v2)
         elif method == 'rbf':
@@ -216,10 +240,58 @@ class GraphKernel(object):
             raise ValueError, \
                 "Wrong method for Graph Kernel.\n You should choose between {} methods".format(', '.join(self.__methods))
 
-    def read_graphs(self, filenames = None, folder = None, ext = None):
-        pass
-    def kernel_matrix(self, ):
-        pass
+    def read_graphs(self, filenames = None, folder = None, ext = None, header=True, weights=True, sep=',', directed=False):
+        '''Read graph from the list of files or from the folder.
+        If filenames is not None, then read graphs from the list in filenames.
+        Then, if folder is not None, then read files from the folder. If extension is specified, then read only files with this extension.'''
+        if filenames is None and folder is None:
+            raise ValueError, "You should provide list of filenames or folder with graphs"
+        if filenames is not None:
+            self.graphs = []
+            for filename in filenames:
+                if filename.split('.')[-1] == 'graphml':
+                    G = self.gv.read_graphml(filename)
+                else:
+                    G = self.gv.read_graph_from_text(filename, header, weights, sep, directed)
+                self.graphs.append(G)
+        elif folder is not None:
+            self.graphs = []
+            for item in os.listdir(folder):
+                if ext is not None:
+                    if item.split('.')[-1] == ext:
+                        if ext == 'graphml':
+                            G = self.gv.read_graphml(folder + '/' + item)
+                        else:
+                            G = self.gv.read_graph_from_text(folder + '/' + item, header, weights, sep, directed)
+                        self.graphs.append(G)
+                else:
+                    if item.split('.')[-1] == 'graphml':
+                        G = self.gv.read_graphml(folder + '/' + item)
+                    else:
+                        G = self.gv.read_graph_from_text(folder + '/' + item, header, weights, sep, directed)
+                    self.graphs.append(G)
+
+    def embed_graphs(self, graph2vec_method = 'exact', steps = 3):
+        if hasattr(self, 'graphs'):
+            print('Using {} method to get graph embeddings'.format(graph2vec_method))
+            N = len(self.graphs)
+            self.gv.graph = self.graphs[0]
+            v, d = self.gv.embed(graph2vec_method, steps, verbose=False)
+            M = len(v)
+            self.embeddings = np.zeros(shape=(N,M))
+            self.embeddings[0] = v
+            for ix, G in enumerate(self.graphs[1:]):
+                self.gv.graph = G
+                v, d = self.gv.embed(graph2vec_method, steps, verbose=False)
+                self.embeddings[ix+1] = v
+        else:
+            raise ValueError, 'Please, first run read_graphs to create graphs.'
+
+    # def kernel_matrix(self):
+    #     if hasattr(self, )
+    #     self.K = np.array()
+
+
 
 
 if __name__ == '__main__':
@@ -229,8 +301,22 @@ if __name__ == '__main__':
 
     G = nx.read_graphml(filename)
     gv = Graph2Vec(G = G)
-    print gv.run(method = 'exact', steps=STEPS)
 
     gk = GraphKernel()
-    print gk.run(G, G)
-    print gk.run(G, G, method='rbf')
+    gk.read_graphs(folder = 'adamas_graphml')
+    # G = gk.graphs[0]
+    # print G.edges(data=True)
+    # gk.embed_graphs()
+    # print gk.embeddings
+    G1 = gk.graphs[0]
+    G2 = gk.graphs[1]
+    print len(G1), len(G1.edges())
+    print len(G2), len(G2.edges())
+    gv.graph = G1
+    print gv.embed('exact', steps = 3, verbose = False)
+    gv.graph = G2
+    print gv.embed('exact', steps = 3, verbose = False)
+    # print gk.run(G1, G2, method='rbf')
+
+
+    console = []
