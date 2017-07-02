@@ -5,16 +5,9 @@ import numpy as np
 class Graph2Vec(object):
     def __init__(self, G = None):
         self._graph = G
+        # paths are dictionary between step and all-paths
         self.paths = dict()
         self.__methods = ['sampling', 'exact']
-
-    @property
-    def graph(self):
-        return self._graph
-
-    @graph.setter
-    def graph(self, G):
-        self._graph = G
 
     def read_graph_from_text(self, filename, header = True, weights = True, sep = ',', directed = False):
         '''Read from Text Files.'''
@@ -221,12 +214,14 @@ class Graph2Vec(object):
         return vector, {'meta-paths': self.paths[steps]}
 
 class GraphKernel(object):
-    def __init__(self):
+    def __init__(self, graphs = None):
         self.gv = Graph2Vec()
+        self.graphs = graphs
         self.__methods = ['dot', 'rbf']
 
     def kernel_value(self, v1, v2, method = 'dot', sigma = 1):
-        ''''''
+        '''Calculates kernel value between two vectors.
+        methods can be dot, rbf. '''
         if method == 'dot':
             return np.array(v1).dot(v2)
         elif method == 'rbf':
@@ -266,26 +261,26 @@ class GraphKernel(object):
                         G = self.gv.read_graph_from_text(folder + '/' + item, header, weights, sep, directed)
                     self.graphs.append(G)
 
-    def embed_graphs(self, graph2vec_method = 'exact', steps = 3):
+    def embed_graphs(self, graph2vec_method = 'exact', steps = 3, M = None, delta = 0.1, eps = 0.1):
         if hasattr(self, 'graphs'):
             print('Using {} method to get graph embeddings'.format(graph2vec_method))
             N = len(self.graphs)
             self.gv.graph = self.graphs[0]
-            v, d = self.gv.embed(graph2vec_method, steps, verbose=False)
+            v, d = self.gv.embed(graph2vec_method, steps, M = M, delta = delta, eps = eps, verbose=False)
             M = len(v)
             self.embeddings = np.zeros(shape=(N,M))
             self.embeddings[0] = v
             for ix, G in enumerate(self.graphs[1:]):
                 self.gv.graph = G
-                v, d = self.gv.embed(graph2vec_method, steps, verbose=False)
+                v, d = self.gv.embed(graph2vec_method, steps, M = M, delta = delta, eps = eps, verbose=False)
                 self.embeddings[ix+1] = v
             self.meta = d
         else:
             raise ValueError, 'Please, first run read_graphs to create graphs.'
 
-    def kernel_matrix(self, kernel_method = 'dot', sigma = 1, graph2vec_method = 'exact', steps = 3):
-        if hasattr(self, 'embeddings'):
-            self.embed_graphs(graph2vec_method, steps)
+    def kernel_matrix(self, kernel_method = 'dot', sigma = 1, graph2vec_method = 'exact', steps = 3, M = None, delta = 0.1, eps = 0.1):
+
+        self.embed_graphs(graph2vec_method, steps, M = M, delta = delta, eps = eps)
 
         N = len(self.graphs)
         self.K = np.zeros(shape=(N,N))
@@ -298,24 +293,103 @@ class GraphKernel(object):
                 self.K[i, j] = prod
                 self.K[j, i] = prod
 
-
-
-
 if __name__ == '__main__':
     filename = 'test_graph_original.graphml'
     STEPS = 3
     M = 100
+    dataset = 'bio/mutag'
 
-    G = nx.read_graphml(filename)
-    gv = Graph2Vec(G = G)
+    with open(dataset + '_label.txt') as f:
+        y = np.array(map(int, f.readlines()[0].split()))
 
     gk = GraphKernel()
-    gk.read_graphs(folder = 'adamas_graphml')
-    gk.embed_graphs()
-    # print gk.meta
-    # print gk.embeddings
-    gk.kernel_matrix('rbf')
-    print gk.K
+    gk.read_graphs(folder = dataset)
+    gk.kernel_matrix('rbf', steps = STEPS)
+
+    K = gk.K
+
+    N, M = K.shape
+    print 'Kernel matrix shape: {}x{}'.format(N, M)
+
+    # permute input data
+    perm = np.random.permutation(N)
+    for i in range(N):
+        K[:, i] = K[perm, i]
+    for i in range(N):
+        K[i, :] = K[i, perm]
+
+    y = y[perm]
+    print y
+
+    alpha = .5
+    n1 = int(alpha*N) # training number
+    n2 = int((1-alpha)/2*N) # validation number
+    K_train = K[:n1, :n1]
+    y_train = y[:n1]
+    K_val = K[n1:(n1+n2), :n1]
+    y_val = y[n1:(n1+n2)]
+    K_test = K[(n1+n2):, :n1]
+    y_test = y[(n1+n2):]
+
+    from sklearn import svm
+    from sklearn.metrics import accuracy_score
+
+    C_grid = np.linspace(10**-5, 10, num=100)
+    val_scores = []
+    test_scores = []
+    for i in range(len(C_grid)):
+        print C_grid[i],
+        model = svm.SVC(kernel='precomputed', C = C_grid[i])
+        model.fit(K_train, y_train)
+
+        y_val_pred = model.predict(K_val)
+        print y_val_pred
+        val_scores.append(accuracy_score(y_val, y_val_pred))
+
+        y_test_pred = model.predict(K_test)
+        test_scores.append(accuracy_score(y_test, y_test_pred))
+
+    print val_scores
+    print test_scores
+    # C_idx = np.argmax(val_scores)
+    # C_best = C_grid[C_idx]
+    # best_test_acc = test_scores[C_idx]
+
+    # from sklearn import datasets
+    # from sklearn.model_selection import train_test_split
+    #
+    # iris = datasets.load_iris()
+    # X = iris.data
+    # y = iris.target
+    #
+    # N = X.shape[0]
+    # K = np.dot(X, X.T)
+    # perm = np.random.permutation(N)
+    # for i in range(N):
+    #     K[:, i] = K[perm, i]
+    # for i in range(N):
+    #     K[i, :] = K[i, perm]
+    #
+    # y = y[perm]
+    #
+    # alpha = .5
+    # n1 = int(alpha * N)  # training number
+    # n2 = int((1-alpha)/2 * N)  # validation number
+    # K_train = K[:n1, :n1]
+    # y_train = y[:n1]
+    # K_val = K[n1:(n1 + n2), :n1]
+    # y_val = y[n1:(n1 + n2)]
+    # K_test = K[(n1 + n2):, :n1]
+    # y_test = y[(n1 + n2):]
+    #
+    # C_grid = np.linspace(10**(-5), 10, num=100)
+    # for i in range(len(C_grid)):
+    #     print C_grid[i],
+    #     model = svm.SVC(kernel = 'precomputed', C = C_grid[i])
+    #     model.fit(K_train, y_train)
+    #
+    #     y_test_pred = model.predict(K_test)
+    #     print accuracy_score(y_test, y_test_pred)
 
 
     console = []
