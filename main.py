@@ -225,11 +225,8 @@ class GraphKernel(object):
         self.gv = Graph2Vec()
         self.__methods = ['dot', 'rbf']
 
-    def run(self, G1, G2, method = 'dot', sigma = 1, graph2vec_method = 'exact', steps = 3):
-        self.gv.graph = G1
-        v1, d1 = self.gv.embed(graph2vec_method, steps = steps)
-        self.gv.graph = G2
-        v2, d2 = self.gv.embed(graph2vec_method, steps = steps)
+    def kernel_value(self, v1, v2, method = 'dot', sigma = 1):
+        ''''''
         if method == 'dot':
             return np.array(v1).dot(v2)
         elif method == 'rbf':
@@ -286,9 +283,20 @@ class GraphKernel(object):
         else:
             raise ValueError, 'Please, first run read_graphs to create graphs.'
 
-    # def kernel_matrix(self):
-    #     if hasattr(self, )
-    #     self.K = np.array()
+    def kernel_matrix(self, kernel_method = 'dot', sigma = 1, graph2vec_method = 'exact', steps = 3):
+        if hasattr(self, 'embeddings'):
+            self.embed_graphs(graph2vec_method, steps)
+
+        N = len(self.graphs)
+        self.K = np.zeros(shape=(N,N))
+
+        for i in range(N):
+            for j in range(i, N):
+                v1 = self.embeddings[i]
+                v2 = self.embeddings[j]
+                prod = self.kernel_value(v1=v1, v2=v2, method=kernel_method, sigma=sigma)
+                self.K[i, j] = prod
+                self.K[j, i] = prod
 
 
 
@@ -304,8 +312,10 @@ if __name__ == '__main__':
     gk = GraphKernel()
     gk.read_graphs(folder = 'adamas_graphml')
     gk.embed_graphs()
-    print gk.meta
-    print gk.embeddings
+    # print gk.meta
+    # print gk.embeddings
+    gk.kernel_matrix('rbf')
+    print gk.K
 
 
     console = []
