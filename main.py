@@ -3,9 +3,8 @@ import random, time, math, os
 import numpy as np
 
 class Graph2Vec(object):
-    def __init__(self, G = None, RW = None):
+    def __init__(self, G = None):
         self._graph = G
-        self.rw_graph = RW
         self.paths = dict()
         self.__methods = ['sampling', 'exact']
 
@@ -16,8 +15,6 @@ class Graph2Vec(object):
     @graph.setter
     def graph(self, G):
         self._graph = G
-        self.create_random_walk_graph()
-
 
     def read_graph_from_text(self, filename, header = True, weights = True, sep = ',', directed = False):
         '''Read from Text Files.'''
@@ -180,8 +177,9 @@ class Graph2Vec(object):
         delta is probability devitation from the true distribution of meta-walks
         eps is absolute value for deviation of first norm
         Return vector and meta information as dictionary.'''
-        if self.rw_graph is None:
-            self.create_random_walk_graph()
+
+        # Create a random walk instance of the graph first
+        self.create_random_walk_graph()
 
         if steps is None:
             steps = 5
@@ -220,7 +218,7 @@ class Graph2Vec(object):
             print patterns
         for path in self.paths[steps]:
             vector.append(patterns.get(tuple(path), 0))
-        return vector, {'meta-paths':self.paths[steps]}
+        return vector, {'meta-paths': self.paths[steps]}
 
 class GraphKernel(object):
     def __init__(self):
@@ -284,6 +282,7 @@ class GraphKernel(object):
                 self.gv.graph = G
                 v, d = self.gv.embed(graph2vec_method, steps, verbose=False)
                 self.embeddings[ix+1] = v
+            self.meta = d
         else:
             raise ValueError, 'Please, first run read_graphs to create graphs.'
 
@@ -304,19 +303,9 @@ if __name__ == '__main__':
 
     gk = GraphKernel()
     gk.read_graphs(folder = 'adamas_graphml')
-    # G = gk.graphs[0]
-    # print G.edges(data=True)
-    # gk.embed_graphs()
-    # print gk.embeddings
-    G1 = gk.graphs[0]
-    G2 = gk.graphs[1]
-    print len(G1), len(G1.edges())
-    print len(G2), len(G2.edges())
-    gv.graph = G1
-    print gv.embed('exact', steps = 3, verbose = False)
-    gv.graph = G2
-    print gv.embed('exact', steps = 3, verbose = False)
-    # print gk.run(G1, G2, method='rbf')
+    gk.embed_graphs()
+    print gk.meta
+    print gk.embeddings
 
 
     console = []
