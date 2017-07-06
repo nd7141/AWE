@@ -9,6 +9,14 @@ class Graph2Vec(object):
         self.paths = dict()
         self.__methods = ['sampling', 'exact']
 
+    @property
+    def graph(self):
+        return self._graph
+
+    @graph.setter
+    def graph(self, G):
+        self._graph = G
+
     def read_graph_from_text(self, filename, header = True, weights = True, sep = ',', directed = False):
         '''Read from Text Files.'''
         G = nx.Graph()
@@ -26,9 +34,11 @@ class Graph2Vec(object):
                     w = float(splitted[2])
                     G[u][v]['weight'] = w
         self.graph = G
+        return self.graph
 
     def read_graphml(self, filename):
-        return nx.read_graphml(filename)
+        self.graph = nx.read_graphml(filename)
+        return self.graph
 
     def create_random_walk_graph(self):
         '''Creates a probabilistic graph from graph with weights.'''
@@ -37,16 +47,16 @@ class Graph2Vec(object):
 
         # get name of the label on graph edges (assume all label names are the same)
         label_name = 'weight'
-        for e in self.graph.edges_iter(data=True):
-            label_name = e[2].keys()[0]
-            break
+        # for e in self.graph.edges_iter(data=True):
+        #     label_name = e[2].keys()[0]
+        #     break
 
         RW = nx.DiGraph()
         for node in self.graph:
             edges = self.graph[node]
-            total = float(sum([edges[v][label_name] for v in edges]))
+            total = float(sum([edges[v].get(label_name, 1) for v in edges]))
             for v in edges:
-                RW.add_edge(node, v, {'weight': edges[v][label_name] / total})
+                RW.add_edge(node, v, {'weight': edges[v].get(label_name,1) / total})
         self.rw_graph = RW
 
     def _all_paths(self, steps):
@@ -64,6 +74,21 @@ class Graph2Vec(object):
                 last_step_paths = current_step_paths
             self.paths[steps] = paths
 
+    def _all_paths_test(self, steps):
+        '''Get all possible meta-paths of length up to steps.'''
+        if self.paths.get(steps) is None:
+            paths = []
+            last_step_paths = [[0]]
+            for i in range(1, steps + 1):
+                current_step_paths = []
+                for j in range(i + 1):
+                    for walks in last_step_paths:
+                        if j <= max(walks) + 1:
+                            paths.append(walks + [j])
+                            current_step_paths.append(walks + [j])
+                last_step_paths = current_step_paths
+            self.paths[steps] = paths
+
     def walk2pattern(self, walk):
         '''Converts a walk with arbitrary nodes to meta-walk.'''
         idx = 0
@@ -74,6 +99,19 @@ class Graph2Vec(object):
                 d[node] = idx
                 idx += 1
             pattern.append(d[node])
+        return tuple(pattern)
+
+    def walk2pattern_test(self, walk):
+        '''Converts a walk with arbitrary nodes to meta-walk, but also considering labels'''
+        idx = 0
+        pattern = []
+        d = dict()
+        for node in walk:
+            label = self.graph.node[node]['label']
+            if label not in d:
+                d[label] = idx
+                idx += 1
+            pattern.append(d[label])
         return tuple(pattern)
 
     def n_samples(self, steps, delta, eps):
@@ -148,10 +186,10 @@ class Graph2Vec(object):
         def patterns(RW, node, steps, walks, current_walk=None, current_dist=1.):
             if current_walk is None:
                 current_walk = [node]
-            if len(current_walk) > 2:  # walks with more than 1 edge
+            if len(current_walk) > 1:  # walks with more than 1 edge
                 all_walks.append(current_walk)
-                walks[self.walk2pattern(current_walk)] = walks.get(self.walk2pattern(current_walk), 0) \
-                                                         + current_dist / len(RW)
+                w2p = self.walk2pattern_test(current_walk)
+                walks[w2p] = walks.get(w2p, 0) + current_dist / len(RW)
             if steps > 0:
                 for v in RW[node]:
                     patterns(RW, v, steps - 1, walks, current_walk + [v], current_dist * RW[node][v]['weight'])
@@ -179,7 +217,7 @@ class Graph2Vec(object):
             if verbose:
                 print("Use default number of steps = {}".format(steps))
 
-        self._all_paths(steps)
+        self._all_paths_test(steps)
 
         if method == 'sampling':
             if verbose:
@@ -293,20 +331,36 @@ class GraphKernel(object):
                 self.K[i, j] = prod
                 self.K[j, i] = prod
 
+    def write_embeddings(self, filename):
+        np.savetxt(filename, self.embeddings, fmt='%.3f')
+
+    def write_kernel_matrix(self, filename):
+        np.savetxt(filename, self.K, fmt='%.3f')
+
 if __name__ == '__main__':
     filename = 'test_graph_original.graphml'
-    STEPS = 3
+    STEPS = 1
     M = 100
     dataset = 'bio/mutag'
 
     with open(dataset + '_label.txt') as f:
         y = np.array(map(int, f.readlines()[0].split()))
 
+    # g2v = Graph2Vec()
+    # g2v.read_graphml(dataset + '/mutag_1.graphml')
+    # print g2v.embed('exact', steps = 3)
+    # g2v._all_paths_test(3)
+
     gk = GraphKernel()
     gk.read_graphs(folder = dataset)
-    gk.kernel_matrix('rbf', steps = STEPS)
+
+    #TODO: adapt algorithm to consider labels
+    gk.kernel_matrix('rbf', steps=STEPS)
 
     K = gk.K
+    np.savetxt('mutag_embeddings_node_labels.txt', gk.embeddings, fmt='%.3f')
+
+    # K = np.loadtxt('mutag_ker_mat.txt')
 
     N, M = K.shape
     print 'Kernel matrix shape: {}x{}'.format(N, M)
@@ -322,24 +376,24 @@ if __name__ == '__main__':
     print y
 
     alpha = .5
-    n1 = int(alpha*N) # training number
-    n2 = int((1-alpha)/2*N) # validation number
+    n1 = int(alpha * N)  # training number
+    n2 = int((1 - alpha) / 2 * N)  # validation number
     K_train = K[:n1, :n1]
     y_train = y[:n1]
-    K_val = K[n1:(n1+n2), :n1]
-    y_val = y[n1:(n1+n2)]
-    K_test = K[(n1+n2):, :n1]
-    y_test = y[(n1+n2):]
+    K_val = K[n1:(n1 + n2), :n1]
+    y_val = y[n1:(n1 + n2)]
+    K_test = K[(n1 + n2):, :n1]
+    y_test = y[(n1 + n2):]
 
     from sklearn import svm
     from sklearn.metrics import accuracy_score
 
-    C_grid = np.linspace(10**-5, 10, num=100)
+    C_grid = np.linspace(10 ** -5, 10, num=100)
     val_scores = []
     test_scores = []
     for i in range(len(C_grid)):
         print C_grid[i],
-        model = svm.SVC(kernel='precomputed', C = C_grid[i])
+        model = svm.SVC(kernel='precomputed', C=C_grid[i])
         model.fit(K_train, y_train)
 
         y_val_pred = model.predict(K_val)
@@ -351,45 +405,5 @@ if __name__ == '__main__':
 
     print val_scores
     print test_scores
-    # C_idx = np.argmax(val_scores)
-    # C_best = C_grid[C_idx]
-    # best_test_acc = test_scores[C_idx]
-
-    # from sklearn import datasets
-    # from sklearn.model_selection import train_test_split
-    #
-    # iris = datasets.load_iris()
-    # X = iris.data
-    # y = iris.target
-    #
-    # N = X.shape[0]
-    # K = np.dot(X, X.T)
-    # perm = np.random.permutation(N)
-    # for i in range(N):
-    #     K[:, i] = K[perm, i]
-    # for i in range(N):
-    #     K[i, :] = K[i, perm]
-    #
-    # y = y[perm]
-    #
-    # alpha = .5
-    # n1 = int(alpha * N)  # training number
-    # n2 = int((1-alpha)/2 * N)  # validation number
-    # K_train = K[:n1, :n1]
-    # y_train = y[:n1]
-    # K_val = K[n1:(n1 + n2), :n1]
-    # y_val = y[n1:(n1 + n2)]
-    # K_test = K[(n1 + n2):, :n1]
-    # y_test = y[(n1 + n2):]
-    #
-    # C_grid = np.linspace(10**(-5), 10, num=100)
-    # for i in range(len(C_grid)):
-    #     print C_grid[i],
-    #     model = svm.SVC(kernel = 'precomputed', C = C_grid[i])
-    #     model.fit(K_train, y_train)
-    #
-    #     y_test_pred = model.predict(K_test)
-    #     print accuracy_score(y_test, y_test_pred)
-
 
     console = []
