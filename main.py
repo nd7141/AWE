@@ -75,19 +75,50 @@ class Graph2Vec(object):
             self.paths[steps] = paths
 
     def _all_paths_test(self, steps):
-        '''Get all possible meta-paths of length up to steps.'''
-        if self.paths.get(steps) is None:
-            paths = []
-            last_step_paths = [[0]]
-            for i in range(1, steps):
-                current_step_paths = []
-                for j in range(i + 1):
-                    for walks in last_step_paths:
-                        if j <= max(walks) + 1:
-                            paths.append(walks + [j])
-                            current_step_paths.append(walks + [j])
-                last_step_paths = current_step_paths
-            self.paths[steps] = paths
+        '''Get all possible meta-paths of length up to steps, using edge labels'''
+        paths = []
+        last_step_paths = [[]]
+        for i in range(0, steps):
+            current_step_paths = []
+            for j in range(i + 1):
+                for walks in last_step_paths:
+                    if j <= max(walks + [0]) + 1:
+                        paths.append(walks + [j])
+                        current_step_paths.append(walks + [j])
+            last_step_paths = current_step_paths
+        self.paths[steps] = paths
+        return paths
+
+    def _all_paths_test2(self, steps):
+        '''Get all possible meta-paths of length up to steps, using node labels'''
+        paths = []
+        last_step_paths = [[0]]
+        for i in range(1, steps+1):
+            current_step_paths = []
+            for j in range(i + 1):
+                for walks in last_step_paths:
+                    if j <= max(walks) + 1:
+                        paths.append(walks + [j])
+                        current_step_paths.append(walks + [j])
+            last_step_paths = current_step_paths
+        self.paths[steps] = paths
+        return paths
+
+    def _all_paths_test3(self, steps):
+        '''Get all possible meta-paths of length up to steps, using edge-node labels'''
+        edge_paths = self._all_paths_test(steps)
+        node_paths = self._all_paths_test2(steps)
+        paths = []
+        for p1 in edge_paths:
+            for p2 in node_paths:
+                if len(p2) == len(p1) + 1:
+                    current_path = [p2[0]]
+                    for ix in range(len(p1)):
+                        current_path.append(p1[ix])
+                        current_path.append(p2[ix+1])
+                    paths.append(current_path)
+        self.paths[steps] = paths
+        return paths
 
     def walk2pattern(self, walk):
         '''Converts a walk with arbitrary nodes to meta-walk.'''
@@ -102,6 +133,19 @@ class Graph2Vec(object):
         return tuple(pattern)
 
     def walk2pattern_test(self, walk):
+        '''Converts a walk with arbitrary nodes to meta-walk, but also considering edge labels'''
+        idx = 0
+        pattern = []
+        d = dict()
+        for ix, node in enumerate(walk[:-1]):
+            label = int(self.graph[walk[ix]][walk[ix + 1]]['label'])
+            if label not in d:
+                d[label] = idx
+                idx += 1
+            pattern.append(d[label])
+        return tuple(pattern)
+
+    def walk2pattern_test2(self, walk):
         '''Converts a walk with arbitrary nodes to meta-walk, but also considering labels'''
         idx = 0
         pattern = []
@@ -114,17 +158,24 @@ class Graph2Vec(object):
             pattern.append(d[label])
         return tuple(pattern)
 
-    def walk2pattern_test2(self, walk):
-        '''Converts a walk with arbitrary nodes to meta-walk, but also considering labels'''
-        idx = 0
-        pattern = []
-        d = dict()
-        for ix, node in enumerate(walk[:-1]):
-            label = int(self.graph[walk[ix]][walk[ix+1]]['label'])
-            if label not in d:
-                d[label] = idx
-                idx += 1
-            pattern.append(d[label])
+    def walk2pattern_test3(self, walk):
+        '''Converts a walk with arbitrary nodes to meta-walk, but also considering edge-node labels'''
+        node_idx = 0
+        edge_idx = 0
+        pattern = [0]
+        node_labels = dict()
+        edge_labels = dict()
+        for ix, node in enumerate(walk[1:]):
+            node_label = self.graph.node[node]['label']
+            edge_label = int(self.graph[walk[ix]][walk[ix+1]]['label'])
+            if node_label not in node_labels:
+                node_labels[node_label] = node_idx
+                node_idx += 1
+            if edge_label not in edge_labels:
+                edge_labels[edge_label] = edge_idx
+                edge_idx += 1
+            pattern.append(node_labels[node_label])
+            pattern.append(edge_labels[edge_label])
         return tuple(pattern)
 
     def n_samples(self, steps, delta, eps):
@@ -201,7 +252,7 @@ class Graph2Vec(object):
                 current_walk = [node]
             if len(current_walk) > 1:  # walks with more than 1 edge
                 all_walks.append(current_walk)
-                w2p = self.walk2pattern_test2(current_walk)
+                w2p = self.walk2pattern_test(current_walk)
                 walks[w2p] = walks.get(w2p, 0) + current_dist / len(RW)
             if steps > 0:
                 for v in RW[node]:
@@ -352,7 +403,7 @@ class GraphKernel(object):
 
 if __name__ == '__main__':
     filename = 'test_graph_original.graphml'
-    STEPS = 3
+    STEPS = 2
     M = 100
     TRIALS = 10
     dataset = 'bio/mutag'
@@ -369,17 +420,19 @@ if __name__ == '__main__':
     gk = GraphKernel()
     gk.read_graphs(folder = dataset)
 
-    # g2v = Graph2Vec(G=gk.graphs[0])
-    # g2v._all_paths_test(2)
+    ### g2v = Graph2Vec(G=gk.graphs[0])
+    ### print g2v._all_paths_test3(2)
+    ### print g2v.walk2pattern_test3(['n20', 'n6', 'n7'])
+    ### print g2v.embed('exact', steps = STEPS)
 
     #TODO: adapt algorithm to consider labels
     gk.kernel_matrix('rbf', steps=STEPS)
 
     K = gk.K
-    np.savetxt('mutag_kernel_rbf_edge_labels.txt', K, fmt='%.3f')
-    np.savetxt('mutag_embeddings_edge_labels.txt', gk.embeddings, fmt='%.3f')
+    # np.savetxt('mutag_kernel_rbf_edge_node_labels.txt', K, fmt='%.3f')
+    # np.savetxt('mutag_embeddings_edge_node_labels.txt', gk.embeddings, fmt='%.3f')
 
-    K = np.loadtxt('mutag_ker_mat.txt')
+    ### K = np.loadtxt('mutag_ker_mat.txt')
 
     N, M = K.shape
     print 'Kernel matrix shape: {}x{}'.format(N, M)
@@ -397,7 +450,7 @@ if __name__ == '__main__':
         y = y[perm]
         # print y
 
-        alpha = .5
+        alpha = .9
         n1 = int(alpha * N)  # training number
         n2 = int((1 - alpha) / 2 * N)  # validation number
         K_train = K[:n1, :n1]
@@ -431,6 +484,6 @@ if __name__ == '__main__':
         optimal_test_scores.append(test_scores[max_idx])
 
     print 'Average Performance on Validation:', np.mean(optimal_val_scores)
-    print 'Average Performance on Test:', np.mean(optimal_test_scores)
+    print 'Average Performance on Test: {:.2f}% +-{:.2f}%'.format(np.mean(optimal_test_scores), np.std(optimal_test_scores))
 
     console = []
