@@ -79,7 +79,7 @@ class Graph2Vec(object):
         if self.paths.get(steps) is None:
             paths = []
             last_step_paths = [[0]]
-            for i in range(1, steps + 1):
+            for i in range(1, steps):
                 current_step_paths = []
                 for j in range(i + 1):
                     for walks in last_step_paths:
@@ -108,6 +108,19 @@ class Graph2Vec(object):
         d = dict()
         for node in walk:
             label = self.graph.node[node]['label']
+            if label not in d:
+                d[label] = idx
+                idx += 1
+            pattern.append(d[label])
+        return tuple(pattern)
+
+    def walk2pattern_test2(self, walk):
+        '''Converts a walk with arbitrary nodes to meta-walk, but also considering labels'''
+        idx = 0
+        pattern = []
+        d = dict()
+        for ix, node in enumerate(walk[:-1]):
+            label = int(self.graph[walk[ix]][walk[ix+1]]['label'])
             if label not in d:
                 d[label] = idx
                 idx += 1
@@ -188,7 +201,7 @@ class Graph2Vec(object):
                 current_walk = [node]
             if len(current_walk) > 1:  # walks with more than 1 edge
                 all_walks.append(current_walk)
-                w2p = self.walk2pattern_test(current_walk)
+                w2p = self.walk2pattern_test2(current_walk)
                 walks[w2p] = walks.get(w2p, 0) + current_dist / len(RW)
             if steps > 0:
                 for v in RW[node]:
@@ -339,9 +352,11 @@ class GraphKernel(object):
 
 if __name__ == '__main__':
     filename = 'test_graph_original.graphml'
-    STEPS = 1
+    STEPS = 3
     M = 100
+    TRIALS = 10
     dataset = 'bio/mutag'
+
 
     with open(dataset + '_label.txt') as f:
         y = np.array(map(int, f.readlines()[0].split()))
@@ -354,56 +369,68 @@ if __name__ == '__main__':
     gk = GraphKernel()
     gk.read_graphs(folder = dataset)
 
+    # g2v = Graph2Vec(G=gk.graphs[0])
+    # g2v._all_paths_test(2)
+
     #TODO: adapt algorithm to consider labels
     gk.kernel_matrix('rbf', steps=STEPS)
 
     K = gk.K
-    np.savetxt('mutag_embeddings_node_labels.txt', gk.embeddings, fmt='%.3f')
+    np.savetxt('mutag_kernel_rbf_edge_labels.txt', K, fmt='%.3f')
+    np.savetxt('mutag_embeddings_edge_labels.txt', gk.embeddings, fmt='%.3f')
 
-    # K = np.loadtxt('mutag_ker_mat.txt')
+    K = np.loadtxt('mutag_ker_mat.txt')
 
     N, M = K.shape
     print 'Kernel matrix shape: {}x{}'.format(N, M)
 
-    # permute input data
-    perm = np.random.permutation(N)
-    for i in range(N):
-        K[:, i] = K[perm, i]
-    for i in range(N):
-        K[i, :] = K[i, perm]
+    optimal_val_scores = []
+    optimal_test_scores = []
+    for _ in range(TRIALS):
+        # permute input data
+        perm = np.random.permutation(N)
+        for i in range(N):
+            K[:, i] = K[perm, i]
+        for i in range(N):
+            K[i, :] = K[i, perm]
 
-    y = y[perm]
-    print y
+        y = y[perm]
+        # print y
 
-    alpha = .5
-    n1 = int(alpha * N)  # training number
-    n2 = int((1 - alpha) / 2 * N)  # validation number
-    K_train = K[:n1, :n1]
-    y_train = y[:n1]
-    K_val = K[n1:(n1 + n2), :n1]
-    y_val = y[n1:(n1 + n2)]
-    K_test = K[(n1 + n2):, :n1]
-    y_test = y[(n1 + n2):]
+        alpha = .5
+        n1 = int(alpha * N)  # training number
+        n2 = int((1 - alpha) / 2 * N)  # validation number
+        K_train = K[:n1, :n1]
+        y_train = y[:n1]
+        K_val = K[n1:(n1 + n2), :n1]
+        y_val = y[n1:(n1 + n2)]
+        K_test = K[(n1 + n2):, :n1]
+        y_test = y[(n1 + n2):]
 
-    from sklearn import svm
-    from sklearn.metrics import accuracy_score
+        from sklearn import svm
+        from sklearn.metrics import accuracy_score
 
-    C_grid = np.linspace(10 ** -5, 10, num=100)
-    val_scores = []
-    test_scores = []
-    for i in range(len(C_grid)):
-        print C_grid[i],
-        model = svm.SVC(kernel='precomputed', C=C_grid[i])
-        model.fit(K_train, y_train)
+        C_grid = np.linspace(10 ** -5, 10, num=100)
+        val_scores = []
+        test_scores = []
+        for i in range(len(C_grid)):
+            # print C_grid[i],
+            model = svm.SVC(kernel='precomputed', C=C_grid[i])
+            model.fit(K_train, y_train)
 
-        y_val_pred = model.predict(K_val)
-        print y_val_pred
-        val_scores.append(accuracy_score(y_val, y_val_pred))
+            y_val_pred = model.predict(K_val)
+            # print y_val_pred
+            val_scores.append(accuracy_score(y_val, y_val_pred))
 
-        y_test_pred = model.predict(K_test)
-        test_scores.append(accuracy_score(y_test, y_test_pred))
+            y_test_pred = model.predict(K_test)
+            test_scores.append(accuracy_score(y_test, y_test_pred))
 
-    print val_scores
-    print test_scores
+        print 'Last prediction values: ', y_val_pred
+        max_idx = np.argmax(val_scores)
+        optimal_val_scores.append(val_scores[max_idx])
+        optimal_test_scores.append(test_scores[max_idx])
+
+    print 'Average Performance on Validation:', np.mean(optimal_val_scores)
+    print 'Average Performance on Test:', np.mean(optimal_test_scores)
 
     console = []
