@@ -1,6 +1,8 @@
 import networkx as nx
 import random, time, math, os
 import numpy as np
+from sklearn import svm
+from sklearn.metrics import accuracy_score
 
 class Graph2Vec(object):
     def __init__(self, G = None):
@@ -423,23 +425,62 @@ class GraphKernel(object):
     def write_kernel_matrix(self, filename):
         np.savetxt(filename, self.K, fmt='%.3f')
 
+    def split(self, y, alpha = .8):
+        N, M = self.K.shape
+
+        perm = np.random.permutation(N)
+        for i in range(N):
+            self.K[:, i] = self.K[perm, i]
+        for i in range(N):
+            self.K[i, :] = self.K[i, perm]
+
+        y = y[perm]
+
+        n1 = int(alpha * N)  # training number
+        n2 = int((1 - alpha) / 2 * N)  # validation number
+        K_train = self.K[:n1, :n1]
+        y_train = y[:n1]
+        K_val = self.K[n1:(n1 + n2), :n1]
+        y_val = y[n1:(n1 + n2)]
+        K_test = self.K[(n1 + n2):, :n1]
+        y_test = y[(n1 + n2):]
+
+        return K_train, K_val, K_test, y_train, y_val, y_test
+
+    def run_SVM(self, y, alpha = .8, lower = 10**-3, upper = 10, num = 10):
+        K_train, K_val, K_test, y_train, y_val, y_test = self.split(y, alpha)
+
+        C_grid = np.linspace(lower, upper, num=num)
+        val_scores = []
+        test_scores = []
+        for i in range(len(C_grid)):
+            model = svm.SVC(kernel='precomputed', C=C_grid[i])
+            model.fit(K_train, y_train)
+
+            y_val_pred = model.predict(K_val)
+            val_scores.append(accuracy_score(y_val, y_val_pred))
+
+            y_test_pred = model.predict(K_test)
+            print i, y_test_pred
+            test_scores.append(accuracy_score(y_test, y_test_pred))
+
+        max_idx = np.argmax(val_scores)
+        return val_scores[max_idx], test_scores[max_idx], C_grid[max_idx]
+
+
 if __name__ == '__main__':
     STEPS = 3
     M = 10
-    TRIALS = 1
-    KERNEL = 'rbf'
+    TRIALS = 10
+    KERNEL = 'dot'
     DATASET = 'mutag'
+    RESULTS_FOLDER = 'kernels_{}/'.format(KERNEL)
     LABELS = None
 
     for DATASET in ['mutag', 'enzymes', 'DD', 'NCI1', 'NCI109']:
 
         with open('bio/' + DATASET + '_label.txt') as f:
             y = np.array(map(int, f.readlines()[0].split()))
-
-    # g2v = Graph2Vec()
-    # g2v.read_graphml(dataset + '/mutag_1.graphml')
-    # print g2v.embed('exact', steps = 3)
-    # g2v._all_paths_test(3)
 
         gk = GraphKernel()
         gk.read_graphs(folder = 'bio/' + DATASET)
@@ -450,10 +491,11 @@ if __name__ == '__main__':
                 gk.kernel_matrix(KERNEL, steps=STEPS, prop=False, labels=LABELS)
 
                 K = gk.K
-                np.savetxt('kernels/kernel_{}_{}_{}_labels.txt'.format(DATASET, KERNEL, LABELS), K, fmt='%.3f')
-                np.savetxt('kernels/embeddings_{}_{}_labels.txt'.format(DATASET, LABELS), gk.embeddings, fmt='%.3f')
+                gk.write_kernel_matrix('{}/kernel_{}_{}_{}_labels.txt'.format(RESULTS_FOLDER, DATASET, KERNEL, LABELS))
+                gk.write_embeddings('{}/embeddings_{}_{}_labels.txt'.format(RESULTS_FOLDER, DATASET, LABELS))
 
-                ### K = np.loadtxt('mutag_ker_mat.txt')
+                ### K = np.loadtxt('kernels/mutag_kernel_wl.txt')
+                ### gk.K = K
 
                 N, M = K.shape
                 print 'Kernel matrix shape: {}x{}'.format(N, M)
@@ -461,55 +503,17 @@ if __name__ == '__main__':
                 optimal_val_scores = []
                 optimal_test_scores = []
                 for _ in range(TRIALS):
-                    # permute input data
-                    perm = np.random.permutation(N)
-                    for i in range(N):
-                        K[:, i] = K[perm, i]
-                    for i in range(N):
-                        K[i, :] = K[i, perm]
-
-                    y = y[perm]
-                    # print y
-
-                    alpha = .9
-                    n1 = int(alpha * N)  # training number
-                    n2 = int((1 - alpha) / 2 * N)  # validation number
-                    K_train = K[:n1, :n1]
-                    y_train = y[:n1]
-                    K_val = K[n1:(n1 + n2), :n1]
-                    y_val = y[n1:(n1 + n2)]
-                    K_test = K[(n1 + n2):, :n1]
-                    y_test = y[(n1 + n2):]
-
-                    from sklearn import svm
-                    from sklearn.metrics import accuracy_score
-
-                    C_grid = np.linspace(10 ** -5, 10, num=100)
-                    val_scores = []
-                    test_scores = []
-                    for i in range(len(C_grid)):
-                        # print C_grid[i],
-                        model = svm.SVC(kernel='precomputed', C=C_grid[i])
-                        model.fit(K_train, y_train)
-
-                        y_val_pred = model.predict(K_val)
-                        # print y_val_pred
-                        val_scores.append(accuracy_score(y_val, y_val_pred))
-
-                        y_test_pred = model.predict(K_test)
-                        test_scores.append(accuracy_score(y_test, y_test_pred))
-
-                    print _, 'Last prediction values: ', y_val_pred
-                    max_idx = np.argmax(val_scores)
-                    optimal_val_scores.append(val_scores[max_idx])
-                    optimal_test_scores.append(test_scores[max_idx])
+                    val, test, C = gk.run_SVM(y, num = 10)
+                    optimal_val_scores.append(val)
+                    optimal_test_scores.append(test)
+                    print val, test, C
 
                 print 'Average Performance on Validation:', np.mean(optimal_val_scores)
                 print 'Average Performance on Test: {:.2f}% +-{:.2f}%'.format(np.mean(optimal_test_scores), np.std(optimal_test_scores))
-                with open('kernels/performance.txt', 'a') as f:
+                with open('{}/performance.txt'.format(RESULTS_FOLDER), 'a') as f:
                     f.write('{} {} {} {}\n'.format(DATASET, LABELS, np.mean(optimal_test_scores), np.std(optimal_test_scores)))
             except Exception, e:
-                print str(e)
+                print e
 
 
     console = []
