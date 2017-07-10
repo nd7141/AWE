@@ -61,20 +61,19 @@ class Graph2Vec(object):
 
     def _all_paths(self, steps):
         '''Get all possible meta-paths of length up to steps.'''
-        if self.paths.get(steps) is None:
-            paths = []
-            last_step_paths = [[0, 1]]
-            for i in range(2, steps+1):
-                current_step_paths = []
-                for j in range(i + 1):
-                    for walks in last_step_paths:
-                        if walks[-1] != j and j <= max(walks) + 1:
-                            paths.append(walks + [j])
-                            current_step_paths.append(walks + [j])
-                last_step_paths = current_step_paths
-            self.paths[steps] = paths
+        paths = []
+        last_step_paths = [[0, 1]]
+        for i in range(2, steps+1):
+            current_step_paths = []
+            for j in range(i + 1):
+                for walks in last_step_paths:
+                    if walks[-1] != j and j <= max(walks) + 1:
+                        paths.append(walks + [j])
+                        current_step_paths.append(walks + [j])
+            last_step_paths = current_step_paths
+        self.paths[steps] = paths
 
-    def _all_paths_test(self, steps):
+    def _all_paths_edges(self, steps):
         '''Get all possible meta-paths of length up to steps, using edge labels'''
         paths = []
         last_step_paths = [[]]
@@ -89,7 +88,7 @@ class Graph2Vec(object):
         self.paths[steps] = paths
         return paths
 
-    def _all_paths_test2(self, steps):
+    def _all_paths_nodes(self, steps):
         '''Get all possible meta-paths of length up to steps, using node labels'''
         paths = []
         last_step_paths = [[0]]
@@ -104,10 +103,10 @@ class Graph2Vec(object):
         self.paths[steps] = paths
         return paths
 
-    def _all_paths_test3(self, steps):
+    def _all_paths_edges_nodes(self, steps):
         '''Get all possible meta-paths of length up to steps, using edge-node labels'''
-        edge_paths = self._all_paths_test(steps)
-        node_paths = self._all_paths_test2(steps)
+        edge_paths = self._all_paths_edges(steps)
+        node_paths = self._all_paths_nodes(steps)
         paths = []
         for p1 in edge_paths:
             for p2 in node_paths:
@@ -121,7 +120,7 @@ class Graph2Vec(object):
         return paths
 
     def walk2pattern(self, walk):
-        '''Converts a walk with arbitrary nodes to meta-walk.'''
+        '''Converts a walk with arbitrary nodes to meta-walk, without considering labels.'''
         idx = 0
         pattern = []
         d = dict()
@@ -132,8 +131,8 @@ class Graph2Vec(object):
             pattern.append(d[node])
         return tuple(pattern)
 
-    def walk2pattern_test(self, walk):
-        '''Converts a walk with arbitrary nodes to meta-walk, but also considering edge labels'''
+    def walk2pattern_edges(self, walk):
+        '''Converts a walk with arbitrary nodes to meta-walk, but also considering edge labels.'''
         idx = 0
         pattern = []
         d = dict()
@@ -145,8 +144,8 @@ class Graph2Vec(object):
             pattern.append(d[label])
         return tuple(pattern)
 
-    def walk2pattern_test2(self, walk):
-        '''Converts a walk with arbitrary nodes to meta-walk, but also considering labels'''
+    def walk2pattern_nodes(self, walk):
+        '''Converts a walk with arbitrary nodes to meta-walk, but also considering node labels.'''
         idx = 0
         pattern = []
         d = dict()
@@ -158,7 +157,7 @@ class Graph2Vec(object):
             pattern.append(d[label])
         return tuple(pattern)
 
-    def walk2pattern_test3(self, walk):
+    def walk2pattern_edges_nodes(self, walk):
         '''Converts a walk with arbitrary nodes to meta-walk, but also considering edge-node labels'''
         node_idx = 0
         edge_idx = 0
@@ -237,10 +236,11 @@ class Graph2Vec(object):
 
         return walks
 
-    def _exact(self, steps, verbose = True):
+    def _exact(self, steps, labels = None, prop = True, verbose = True):
         '''Find vector representation using exact method.
             Calculates probabilities from each node to all other nodes within n steps.
             Running time is the O(# number of random walks) <= O(n*d_max^steps).
+            labels, possible values None (no labels), 'edges', 'nodes', 'edges_nodes'.
             steps is the number of steps.
             Returns dictionary pattern to probability.
         '''
@@ -252,8 +252,20 @@ class Graph2Vec(object):
                 current_walk = [node]
             if len(current_walk) > 1:  # walks with more than 1 edge
                 all_walks.append(current_walk)
-                w2p = self.walk2pattern_test(current_walk)
-                walks[w2p] = walks.get(w2p, 0) + current_dist / len(RW)
+                if labels is None:
+                    w2p = self.walk2pattern(current_walk)
+                elif labels == 'edges':
+                    w2p = self.walk2pattern_edges(current_walk)
+                elif labels == 'nodes':
+                    w2p = self.walk2pattern_nodes(current_walk)
+                elif labels == 'edges_nodes':
+                    w2p = self.walk2pattern_edges_nodes(current_walk)
+                else:
+                    raise ValueError, 'labels argument should be one of the following: edges, nodes, edges_nodes, None.'
+                amount = current_dist
+                if prop:
+                    amount /= len(RW)
+                walks[w2p] = walks.get(w2p, 0) + amount # / len(RW) test: not normalizing
             if steps > 0:
                 for v in RW[node]:
                     patterns(RW, v, steps - 1, walks, current_walk + [v], current_dist * RW[node][v]['weight'])
@@ -264,11 +276,12 @@ class Graph2Vec(object):
             print('Total walks of size {} in a graph:'.format(steps), len(all_walks))
         return walks
 
-    def embed(self, method = 'sampling', steps = None, M = None, delta = 0.1, eps = 0.1, verbose = True):
+    def embed(self, method = 'exact', steps = None, M = None, delta = 0.1, eps = 0.1, prop=True, labels = None, verbose = True):
         '''Generic function to get vector representation.
         method can be sampling, exact
         steps is the number of steps.
         M is the number of iterations.
+        labels, possible values None (no labels), 'edges', 'nodes', 'edges_nodes'.
         delta is probability devitation from the true distribution of meta-walks
         eps is absolute value for deviation of first norm
         Return vector and meta information as dictionary.'''
@@ -281,7 +294,16 @@ class Graph2Vec(object):
             if verbose:
                 print("Use default number of steps = {}".format(steps))
 
-        self._all_paths_test(steps)
+        if labels is None:
+            self._all_paths(steps)
+        elif labels == 'edges':
+            self._all_paths_edges(steps)
+        elif labels == 'nodes':
+            self._all_paths_nodes(steps)
+        elif labels == 'edges_nodes':
+            self._all_paths_edges_nodes(steps)
+        else:
+            raise ValueError, 'labels argument should be one of the following: edges, nodes, edges_nodes, None.'
 
         if method == 'sampling':
             if verbose:
@@ -291,7 +313,7 @@ class Graph2Vec(object):
                 if verbose:
                     print("Use number of iterations = {} for delta = {} and eps = {}".format(M, delta, eps))
             start = time.time()
-            patterns = self._sampling(steps, M)
+            patterns = self._sampling(steps, M, prop=prop)
             finish = time.time()
             if verbose:
                 print('Spent {} sec to get vector representation via sampling method.'.format(round(finish - start, 2)))
@@ -299,7 +321,7 @@ class Graph2Vec(object):
             if verbose:
                 print("Use exact method to get vector representation.")
             start = time.time()
-            patterns = self._exact(steps, verbose=verbose)
+            patterns = self._exact(steps, labels = labels, prop=prop, verbose=verbose)
             finish = time.time()
             if verbose:
                 print('Spent {} sec to get vector representation via exact method.'.format(round(finish - start, 2)))
@@ -363,26 +385,26 @@ class GraphKernel(object):
                         G = self.gv.read_graph_from_text(folder + '/' + item, header, weights, sep, directed)
                     self.graphs.append(G)
 
-    def embed_graphs(self, graph2vec_method = 'exact', steps = 3, M = None, delta = 0.1, eps = 0.1):
+    def embed_graphs(self, graph2vec_method = 'exact', steps = 3, M = None, delta = 0.1, eps = 0.1, labels=None, prop=True):
         if hasattr(self, 'graphs'):
             print('Using {} method to get graph embeddings'.format(graph2vec_method))
             N = len(self.graphs)
             self.gv.graph = self.graphs[0]
-            v, d = self.gv.embed(graph2vec_method, steps, M = M, delta = delta, eps = eps, verbose=False)
+            v, d = self.gv.embed(graph2vec_method, steps, M = M, delta = delta, eps = eps, prop=prop, labels=labels, verbose=False)
             M = len(v)
             self.embeddings = np.zeros(shape=(N,M))
             self.embeddings[0] = v
             for ix, G in enumerate(self.graphs[1:]):
                 self.gv.graph = G
-                v, d = self.gv.embed(graph2vec_method, steps, M = M, delta = delta, eps = eps, verbose=False)
+                v, d = self.gv.embed(graph2vec_method, steps, M = M, delta = delta, eps = eps, prop=prop, labels=labels, verbose=False)
                 self.embeddings[ix+1] = v
             self.meta = d
         else:
             raise ValueError, 'Please, first run read_graphs to create graphs.'
 
-    def kernel_matrix(self, kernel_method = 'dot', sigma = 1, graph2vec_method = 'exact', steps = 3, M = None, delta = 0.1, eps = 0.1):
+    def kernel_matrix(self, kernel_method = 'dot', sigma = 1, graph2vec_method = 'exact', steps = 3, M = None, delta = 0.1, eps = 0.1, prop=True, labels = None):
 
-        self.embed_graphs(graph2vec_method, steps, M = M, delta = delta, eps = eps)
+        self.embed_graphs(graph2vec_method, steps, M = M, delta = delta, eps = eps, labels = labels, prop=prop)
 
         N = len(self.graphs)
         self.K = np.zeros(shape=(N,N))
@@ -402,88 +424,92 @@ class GraphKernel(object):
         np.savetxt(filename, self.K, fmt='%.3f')
 
 if __name__ == '__main__':
-    filename = 'test_graph_original.graphml'
-    STEPS = 2
-    M = 100
-    TRIALS = 10
-    dataset = 'bio/mutag'
+    STEPS = 3
+    M = 10
+    TRIALS = 1
+    KERNEL = 'rbf'
+    DATASET = 'mutag'
+    LABELS = None
 
+    for DATASET in ['mutag', 'enzymes', 'DD', 'NCI1', 'NCI109']:
 
-    with open(dataset + '_label.txt') as f:
-        y = np.array(map(int, f.readlines()[0].split()))
+        with open('bio/' + DATASET + '_label.txt') as f:
+            y = np.array(map(int, f.readlines()[0].split()))
 
     # g2v = Graph2Vec()
     # g2v.read_graphml(dataset + '/mutag_1.graphml')
     # print g2v.embed('exact', steps = 3)
     # g2v._all_paths_test(3)
 
-    gk = GraphKernel()
-    gk.read_graphs(folder = dataset)
+        gk = GraphKernel()
+        gk.read_graphs(folder = 'bio/' + DATASET)
 
-    ### g2v = Graph2Vec(G=gk.graphs[0])
-    ### print g2v._all_paths_test3(2)
-    ### print g2v.walk2pattern_test3(['n20', 'n6', 'n7'])
-    ### print g2v.embed('exact', steps = STEPS)
+        #TODO: adapt algorithm to consider labels
+        for LABELS in [None, 'edges', 'nodes', 'edges_nodes']:
+            try:
+                gk.kernel_matrix(KERNEL, steps=STEPS, prop=False, labels=LABELS)
 
-    #TODO: adapt algorithm to consider labels
-    gk.kernel_matrix('rbf', steps=STEPS)
+                K = gk.K
+                np.savetxt('kernels/kernel_{}_{}_{}_labels.txt'.format(DATASET, KERNEL, LABELS), K, fmt='%.3f')
+                np.savetxt('kernels/embeddings_{}_{}_labels.txt'.format(DATASET, LABELS), gk.embeddings, fmt='%.3f')
 
-    K = gk.K
-    # np.savetxt('mutag_kernel_rbf_edge_node_labels.txt', K, fmt='%.3f')
-    # np.savetxt('mutag_embeddings_edge_node_labels.txt', gk.embeddings, fmt='%.3f')
+                ### K = np.loadtxt('mutag_ker_mat.txt')
 
-    ### K = np.loadtxt('mutag_ker_mat.txt')
+                N, M = K.shape
+                print 'Kernel matrix shape: {}x{}'.format(N, M)
 
-    N, M = K.shape
-    print 'Kernel matrix shape: {}x{}'.format(N, M)
+                optimal_val_scores = []
+                optimal_test_scores = []
+                for _ in range(TRIALS):
+                    # permute input data
+                    perm = np.random.permutation(N)
+                    for i in range(N):
+                        K[:, i] = K[perm, i]
+                    for i in range(N):
+                        K[i, :] = K[i, perm]
 
-    optimal_val_scores = []
-    optimal_test_scores = []
-    for _ in range(TRIALS):
-        # permute input data
-        perm = np.random.permutation(N)
-        for i in range(N):
-            K[:, i] = K[perm, i]
-        for i in range(N):
-            K[i, :] = K[i, perm]
+                    y = y[perm]
+                    # print y
 
-        y = y[perm]
-        # print y
+                    alpha = .9
+                    n1 = int(alpha * N)  # training number
+                    n2 = int((1 - alpha) / 2 * N)  # validation number
+                    K_train = K[:n1, :n1]
+                    y_train = y[:n1]
+                    K_val = K[n1:(n1 + n2), :n1]
+                    y_val = y[n1:(n1 + n2)]
+                    K_test = K[(n1 + n2):, :n1]
+                    y_test = y[(n1 + n2):]
 
-        alpha = .9
-        n1 = int(alpha * N)  # training number
-        n2 = int((1 - alpha) / 2 * N)  # validation number
-        K_train = K[:n1, :n1]
-        y_train = y[:n1]
-        K_val = K[n1:(n1 + n2), :n1]
-        y_val = y[n1:(n1 + n2)]
-        K_test = K[(n1 + n2):, :n1]
-        y_test = y[(n1 + n2):]
+                    from sklearn import svm
+                    from sklearn.metrics import accuracy_score
 
-        from sklearn import svm
-        from sklearn.metrics import accuracy_score
+                    C_grid = np.linspace(10 ** -5, 10, num=100)
+                    val_scores = []
+                    test_scores = []
+                    for i in range(len(C_grid)):
+                        # print C_grid[i],
+                        model = svm.SVC(kernel='precomputed', C=C_grid[i])
+                        model.fit(K_train, y_train)
 
-        C_grid = np.linspace(10 ** -5, 10, num=100)
-        val_scores = []
-        test_scores = []
-        for i in range(len(C_grid)):
-            # print C_grid[i],
-            model = svm.SVC(kernel='precomputed', C=C_grid[i])
-            model.fit(K_train, y_train)
+                        y_val_pred = model.predict(K_val)
+                        # print y_val_pred
+                        val_scores.append(accuracy_score(y_val, y_val_pred))
 
-            y_val_pred = model.predict(K_val)
-            # print y_val_pred
-            val_scores.append(accuracy_score(y_val, y_val_pred))
+                        y_test_pred = model.predict(K_test)
+                        test_scores.append(accuracy_score(y_test, y_test_pred))
 
-            y_test_pred = model.predict(K_test)
-            test_scores.append(accuracy_score(y_test, y_test_pred))
+                    print _, 'Last prediction values: ', y_val_pred
+                    max_idx = np.argmax(val_scores)
+                    optimal_val_scores.append(val_scores[max_idx])
+                    optimal_test_scores.append(test_scores[max_idx])
 
-        print 'Last prediction values: ', y_val_pred
-        max_idx = np.argmax(val_scores)
-        optimal_val_scores.append(val_scores[max_idx])
-        optimal_test_scores.append(test_scores[max_idx])
+                print 'Average Performance on Validation:', np.mean(optimal_val_scores)
+                print 'Average Performance on Test: {:.2f}% +-{:.2f}%'.format(np.mean(optimal_test_scores), np.std(optimal_test_scores))
+                with open('kernels/performance.txt', 'a') as f:
+                    f.write('{} {} {} {}\n'.format(DATASET, LABELS, np.mean(optimal_test_scores), np.std(optimal_test_scores)))
+            except Exception, e:
+                print str(e)
 
-    print 'Average Performance on Validation:', np.mean(optimal_val_scores)
-    print 'Average Performance on Test: {:.2f}% +-{:.2f}%'.format(np.mean(optimal_test_scores), np.std(optimal_test_scores))
 
     console = []
