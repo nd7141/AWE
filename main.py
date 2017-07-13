@@ -3,6 +3,7 @@ import random, time, math, os
 import numpy as np
 from sklearn import svm
 from sklearn.metrics import accuracy_score
+import matplotlib.pyplot as plt
 
 class Graph2Vec(object):
     def __init__(self, G = None):
@@ -278,6 +279,9 @@ class Graph2Vec(object):
             print('Total walks of size {} in a graph:'.format(steps), len(all_walks))
         return walks
 
+    def _test_embedding(self):
+        return [len(self.graph), len(self.graph.edges())]
+
     def embed(self, method = 'exact', steps = None, M = None, delta = 0.1, eps = 0.1, prop=True, labels = None, verbose = True):
         '''Generic function to get vector representation.
         method can be sampling, exact
@@ -392,15 +396,17 @@ class GraphKernel(object):
             print('Using {} method to get graph embeddings'.format(graph2vec_method))
             N = len(self.graphs)
             self.gv.graph = self.graphs[0]
-            v, d = self.gv.embed(graph2vec_method, steps, M = M, delta = delta, eps = eps, prop=prop, labels=labels, verbose=False)
+            # v, d = self.gv.embed(graph2vec_method, steps, M = M, delta = delta, eps = eps, prop=prop, labels=labels, verbose=False)
+            v = self.gv._test_embedding()
             M = len(v)
             self.embeddings = np.zeros(shape=(N,M))
             self.embeddings[0] = v
             for ix, G in enumerate(self.graphs[1:]):
                 self.gv.graph = G
-                v, d = self.gv.embed(graph2vec_method, steps, M = M, delta = delta, eps = eps, prop=prop, labels=labels, verbose=False)
+                # v, d = self.gv.embed(graph2vec_method, steps, M = M, delta = delta, eps = eps, prop=prop, labels=labels, verbose=False)
+                v = self.gv._test_embedding()
                 self.embeddings[ix+1] = v
-            self.meta = d
+            # self.meta = d
         else:
             raise ValueError, 'Please, first run read_graphs to create graphs.'
 
@@ -472,48 +478,108 @@ if __name__ == '__main__':
     STEPS = 3
     M = 10
     TRIALS = 10
-    KERNEL = 'dot'
-    DATASET = 'mutag'
-    RESULTS_FOLDER = 'kernels_{}/'.format(KERNEL)
+    KERNEL = 'rbf'
+    DATASET = 'NCI109'
+    RESULTS_FOLDER = 'test_{}/'.format(KERNEL)
     LABELS = None
 
-    for DATASET in ['mutag', 'enzymes', 'DD', 'NCI1', 'NCI109']:
+    if not os.path.exists(RESULTS_FOLDER):
+        os.makedirs(RESULTS_FOLDER)
 
-        with open('bio/' + DATASET + '_label.txt') as f:
-            y = np.array(map(int, f.readlines()[0].split()))
+    gk = GraphKernel()
+    # gk.read_graphs(filenames = ['bio/mutag/mutag_1.graphml', 'bio/mutag/mutag_188.graphml'], directed = True)
+    gk.read_graphs(folder = 'bio/{}'.format(DATASET))
 
-        gk = GraphKernel()
-        gk.read_graphs(folder = 'bio/' + DATASET)
+    # plt.figure(figsize=(15, 8))
+    # for i, G in enumerate(gk.graphs):
+    #     plt.subplot(1, 2, i+1)
+    #     pos = nx.shell_layout(G)
+    #     nx.draw_networkx(G, pos = pos, with_labels = True)
+    #     plt.title('Graph {}'.format((189 - i) % 189))
+    # plt.show()
 
-        #TODO: adapt algorithm to consider labels
-        for LABELS in [None, 'edges', 'nodes', 'edges_nodes']:
-            try:
-                gk.kernel_matrix(KERNEL, steps=STEPS, prop=False, labels=LABELS)
+    gk.embed_graphs()
+    K = gk.embeddings
 
-                K = gk.K
-                gk.write_kernel_matrix('{}/kernel_{}_{}_{}_labels.txt'.format(RESULTS_FOLDER, DATASET, KERNEL, LABELS))
-                gk.write_embeddings('{}/embeddings_{}_{}_labels.txt'.format(RESULTS_FOLDER, DATASET, LABELS))
+    with open('bio/' + DATASET + '_label.txt') as f:
+        y = np.array(map(int, f.readlines()[0].split()))
 
-                ### K = np.loadtxt('kernels/mutag_kernel_wl.txt')
-                ### gk.K = K
+    N, M = K.shape
 
-                N, M = K.shape
-                print 'Kernel matrix shape: {}x{}'.format(N, M)
+    from sklearn.model_selection import train_test_split
 
-                optimal_val_scores = []
-                optimal_test_scores = []
-                for _ in range(TRIALS):
-                    val, test, C = gk.run_SVM(y, num = 10)
-                    optimal_val_scores.append(val)
-                    optimal_test_scores.append(test)
-                    print val, test, C
+    C_grid = np.linspace(10**(-5), 10, num=10)
+    optimal_val_scores = []
+    optimal_test_scores = []
+    for _ in range(TRIALS):
+        X1, K_test, y1, y_test = train_test_split(K, y, test_size=0.2)
+        K_train, K_val, y_train, y_val = train_test_split(X1, y1, test_size=0.2)
 
-                print 'Average Performance on Validation:', np.mean(optimal_val_scores)
-                print 'Average Performance on Test: {:.2f}% +-{:.2f}%'.format(np.mean(optimal_test_scores), np.std(optimal_test_scores))
-                with open('{}/performance.txt'.format(RESULTS_FOLDER), 'a') as f:
-                    f.write('{} {} {} {}\n'.format(DATASET, LABELS, np.mean(optimal_test_scores), np.std(optimal_test_scores)))
-            except Exception, e:
-                print e
+        val_scores = []
+        test_scores = []
+        for i in range(len(C_grid)):
+            model = svm.SVC(C=C_grid[i])
+            model.fit(K_train, y_train)
+
+            y_val_pred = model.predict(K_val)
+            val_scores.append(accuracy_score(y_val, y_val_pred))
+
+            y_test_pred = model.predict(K_test)
+            print i, round(C_grid[i], 2), y_test_pred
+            test_scores.append(accuracy_score(y_test, y_test_pred))
+
+        max_idx = np.argmax(val_scores)
+        model2 = svm.SVC(C=C_grid[max_idx])
+        model2.fit(X1, y1)
+        y_test_pred = model2.predict(K_test)
+
+        # print val_scores[max_idx], test_scores[max_idx], C_grid[max_idx]
+        optimal_val_scores.append(val_scores[max_idx])
+        optimal_test_scores.append(accuracy_score(y_test, y_test_pred))
+
+    print 'Average Performance on Validation: {:.2f}% +-{:.2f}%'.format(np.mean(optimal_val_scores),
+                                                                  np.std(optimal_val_scores))
+    print 'Average Performance on Test: {:.2f}% +-{:.2f}%'.format(np.mean(optimal_test_scores),
+                                                                  np.std(optimal_test_scores))
+
+
+    # for DATASET in ['mutag']: #, 'enzymes', 'DD', 'NCI1', 'NCI109']:
+    #
+    #     with open('bio/' + DATASET + '_label.txt') as f:
+    #         y = np.array(map(int, f.readlines()[0].split()))
+    #
+    #     gk = GraphKernel()
+    #     gk.read_graphs(folder = 'bio/' + DATASET)
+    #
+    #     #TODO: adapt algorithm to consider labels
+    #     for LABELS in [None]: #, 'edges', 'nodes', 'edges_nodes']:
+    #         try:
+    #             gk.kernel_matrix(KERNEL, steps=STEPS, prop=False, labels=LABELS)
+    #
+    #             K = gk.K
+    #             gk.write_kernel_matrix('{}/kernel_{}_{}_{}_labels.txt'.format(RESULTS_FOLDER, DATASET, KERNEL, LABELS))
+    #             gk.write_embeddings('{}/embeddings_{}_{}_labels.txt'.format(RESULTS_FOLDER, DATASET, LABELS))
+    #
+    #             ### K = np.loadtxt('kernels/mutag_kernel_wl.txt')
+    #             ### gk.K = K
+    #
+    #             N, M = K.shape
+    #             print 'Kernel matrix shape: {}x{}'.format(N, M)
+    #
+    #             optimal_val_scores = []
+    #             optimal_test_scores = []
+    #             for _ in range(TRIALS):
+    #                 val, test, C = gk.run_SVM(y, num = 10)
+    #                 optimal_val_scores.append(val)
+    #                 optimal_test_scores.append(test)
+    #                 print val, test, C
+    #
+    #             print 'Average Performance on Validation:', np.mean(optimal_val_scores)
+    #             print 'Average Performance on Test: {:.2f}% +-{:.2f}%'.format(np.mean(optimal_test_scores), np.std(optimal_test_scores))
+    #             with open('{}/performance.txt'.format(RESULTS_FOLDER), 'a') as f:
+    #                 f.write('{} {} {} {}\n'.format(DATASET, LABELS, np.mean(optimal_test_scores), np.std(optimal_test_scores)))
+    #         except Exception, e:
+    #             print e
 
 
     console = []
