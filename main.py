@@ -4,6 +4,7 @@ import numpy as np
 from sklearn import svm
 from sklearn.metrics import accuracy_score
 import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
 
 class Graph2Vec(object):
     def __init__(self, G = None):
@@ -74,6 +75,8 @@ class Graph2Vec(object):
                         paths.append(walks + [j])
                         current_step_paths.append(walks + [j])
             last_step_paths = current_step_paths
+        # filter only on n-steps walks
+        paths = filter(lambda path: len(path) ==  steps + 1, paths)
         self.paths[steps] = paths
 
     def _all_paths_edges(self, steps):
@@ -279,9 +282,6 @@ class Graph2Vec(object):
             print('Total walks of size {} in a graph:'.format(steps), len(all_walks))
         return walks
 
-    def _test_embedding(self):
-        return [len(self.graph), len(self.graph.edges())]
-
     def embed(self, method = 'exact', steps = None, M = None, delta = 0.1, eps = 0.1, prop=True, labels = None, verbose = True):
         '''Generic function to get vector representation.
         method can be sampling, exact
@@ -396,21 +396,22 @@ class GraphKernel(object):
             print('Using {} method to get graph embeddings'.format(graph2vec_method))
             N = len(self.graphs)
             self.gv.graph = self.graphs[0]
-            # v, d = self.gv.embed(graph2vec_method, steps, M = M, delta = delta, eps = eps, prop=prop, labels=labels, verbose=False)
-            v = self.gv._test_embedding()
+            v, d = self.gv.embed(graph2vec_method, steps, M = M, delta = delta, eps = eps, prop=prop, labels=labels, verbose=False)
             M = len(v)
             self.embeddings = np.zeros(shape=(N,M))
             self.embeddings[0] = v
             for ix, G in enumerate(self.graphs[1:]):
                 self.gv.graph = G
-                # v, d = self.gv.embed(graph2vec_method, steps, M = M, delta = delta, eps = eps, prop=prop, labels=labels, verbose=False)
-                v = self.gv._test_embedding()
+                v, d = self.gv.embed(graph2vec_method, steps, M = M, delta = delta, eps = eps, prop=prop, labels=labels, verbose=False)
                 self.embeddings[ix+1] = v
-            # self.meta = d
+            self.meta = d
+
+            pca = PCA(n_components=0.9)
+            self.embeddings = pca.fit_transform(self.embeddings)
         else:
             raise ValueError, 'Please, first run read_graphs to create graphs.'
 
-    def kernel_matrix(self, kernel_method = 'dot', sigma = 1, graph2vec_method = 'exact', steps = 3, M = None, delta = 0.1, eps = 0.1, prop=True, labels = None):
+    def kernel_matrix(self, kernel_method = 'rbf', sigma = 1, graph2vec_method = 'exact', steps = 3, M = None, delta = 0.1, eps = 0.1, prop=True, labels = None):
 
         self.embed_graphs(graph2vec_method, steps, M = M, delta = delta, eps = eps, labels = labels, prop=prop)
 
@@ -448,17 +449,19 @@ class GraphKernel(object):
         y_train = y[:n1]
         K_val = self.K[n1:(n1 + n2), :n1]
         y_val = y[n1:(n1 + n2)]
-        K_test = self.K[(n1 + n2):, :n1]
+        K_train_val = self.K[:(n1 + n2), :(n1+n2)]
+        y_train_val = y[:(n1 + n2)]
+        K_test = self.K[(n1 + n2):, :(n1+n2)]
         y_test = y[(n1 + n2):]
 
-        return K_train, K_val, K_test, y_train, y_val, y_test
+        return K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val
 
-    def run_SVM(self, y, alpha = .8, lower = 10**-3, upper = 10, num = 10):
-        K_train, K_val, K_test, y_train, y_val, y_test = self.split(y, alpha)
+    def run_SVM(self, y, alpha = .8, lower = 10**(-3), upper = 10, num = 10):
+        K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val = self.split(y, alpha)
 
-        C_grid = np.linspace(lower, upper, num=num)
+        # C_grid = np.linspace(lower, upper, num=num)
+        C_grid = 10.**(-np.arange(-1, 11))
         val_scores = []
-        test_scores = []
         for i in range(len(C_grid)):
             model = svm.SVC(kernel='precomputed', C=C_grid[i])
             model.fit(K_train, y_train)
@@ -466,20 +469,21 @@ class GraphKernel(object):
             y_val_pred = model.predict(K_val)
             val_scores.append(accuracy_score(y_val, y_val_pred))
 
-            y_test_pred = model.predict(K_test)
-            print i, y_test_pred
-            test_scores.append(accuracy_score(y_test, y_test_pred))
-
         max_idx = np.argmax(val_scores)
-        return val_scores[max_idx], test_scores[max_idx], C_grid[max_idx]
+        model = svm.SVC(kernel = 'precomputed', C = C_grid[max_idx])
+        model.fit(K_train_val, y_train_val)
+
+        y_test_pred = model.predict(K_test)
+        print y_test_pred
+        return val_scores[max_idx], accuracy_score(y_test, y_test_pred), C_grid[max_idx]
 
 
 if __name__ == '__main__':
-    STEPS = 3
+    STEPS = 5
     M = 10
     TRIALS = 10
-    KERNEL = 'rbf'
-    DATASET = 'NCI109'
+    KERNEL = 'dot'
+    DATASET = 'mutag'
     RESULTS_FOLDER = 'test_{}/'.format(KERNEL)
     LABELS = None
 
@@ -489,6 +493,41 @@ if __name__ == '__main__':
     gk = GraphKernel()
     # gk.read_graphs(filenames = ['bio/mutag/mutag_1.graphml', 'bio/mutag/mutag_188.graphml'], directed = True)
     gk.read_graphs(folder = 'bio/{}'.format(DATASET))
+    # gk.embed_graphs(steps = STEPS, prop=False)
+    # gk.kernel_matrix(kernel_method=KERNEL, steps = STEPS, prop = False)
+    # pca = PCA(n_components=0.9)
+    # pca.fit(gk.embeddings)
+    # print pca.explained_variance_ratio_
+    # X1 = pca.transform(gk.embeddings)
+    # np.savetxt(RESULTS_FOLDER + 'embeddings.txt', X1, fmt = '%.2f')
+
+    # gk.write_kernel_matrix('{}/kernel_{}_{}_{}_labels.txt'.format(RESULTS_FOLDER, DATASET, KERNEL, LABELS))
+    # gk.write_embeddings('{}/embeddings_{}_{}_labels.txt'.format(RESULTS_FOLDER, DATASET, LABELS))
+
+
+    with open('bio/' + DATASET + '_label.txt') as f:
+        y = np.array(map(int, f.readlines()[0].split()))
+
+    sigma_grid = np.linspace(10**(-4), 10, num=10)
+    sigma_grid = 10.**(-np.arange(-1, 11))
+    sigma_test_score = []
+    for six in range(len(sigma_grid)):
+        print sigma_grid[six]
+        gk.kernel_matrix(kernel_method=KERNEL, steps=STEPS, prop=True, sigma = sigma_grid[six])
+        tests = []
+        for _ in range(TRIALS):
+            results = gk.run_SVM(y, alpha = .9)
+            tests.append(results[1])
+        print 'Result: ', np.mean(tests)
+        sigma_test_score.append(np.mean(tests))
+
+    max_idx = np.argmax(sigma_test_score)
+    print sigma_test_score[max_idx]
+    print sigma_grid[max_idx]
+    print sigma_test_score
+
+
+
 
     # plt.figure(figsize=(15, 8))
     # for i, G in enumerate(gk.graphs):
@@ -497,50 +536,6 @@ if __name__ == '__main__':
     #     nx.draw_networkx(G, pos = pos, with_labels = True)
     #     plt.title('Graph {}'.format((189 - i) % 189))
     # plt.show()
-
-    gk.embed_graphs()
-    K = gk.embeddings
-
-    with open('bio/' + DATASET + '_label.txt') as f:
-        y = np.array(map(int, f.readlines()[0].split()))
-
-    N, M = K.shape
-
-    from sklearn.model_selection import train_test_split
-
-    C_grid = np.linspace(10**(-5), 10, num=10)
-    optimal_val_scores = []
-    optimal_test_scores = []
-    for _ in range(TRIALS):
-        X1, K_test, y1, y_test = train_test_split(K, y, test_size=0.2)
-        K_train, K_val, y_train, y_val = train_test_split(X1, y1, test_size=0.2)
-
-        val_scores = []
-        test_scores = []
-        for i in range(len(C_grid)):
-            model = svm.SVC(C=C_grid[i])
-            model.fit(K_train, y_train)
-
-            y_val_pred = model.predict(K_val)
-            val_scores.append(accuracy_score(y_val, y_val_pred))
-
-            y_test_pred = model.predict(K_test)
-            print i, round(C_grid[i], 2), y_test_pred
-            test_scores.append(accuracy_score(y_test, y_test_pred))
-
-        max_idx = np.argmax(val_scores)
-        model2 = svm.SVC(C=C_grid[max_idx])
-        model2.fit(X1, y1)
-        y_test_pred = model2.predict(K_test)
-
-        # print val_scores[max_idx], test_scores[max_idx], C_grid[max_idx]
-        optimal_val_scores.append(val_scores[max_idx])
-        optimal_test_scores.append(accuracy_score(y_test, y_test_pred))
-
-    print 'Average Performance on Validation: {:.2f}% +-{:.2f}%'.format(np.mean(optimal_val_scores),
-                                                                  np.std(optimal_val_scores))
-    print 'Average Performance on Test: {:.2f}% +-{:.2f}%'.format(np.mean(optimal_test_scores),
-                                                                  np.std(optimal_test_scores))
 
 
     # for DATASET in ['mutag']: #, 'enzymes', 'DD', 'NCI1', 'NCI109']:
