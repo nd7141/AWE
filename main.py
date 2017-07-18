@@ -5,6 +5,7 @@ from sklearn import svm
 from sklearn.metrics import accuracy_score
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
+from sklearn.model_selection import train_test_split
 
 class Graph2Vec(object):
     def __init__(self, G = None):
@@ -406,8 +407,8 @@ class GraphKernel(object):
                 self.embeddings[ix+1] = v
             self.meta = d
 
-            pca = PCA(n_components=0.9)
-            self.embeddings = pca.fit_transform(self.embeddings)
+            # pca = PCA(n_components=0.9)
+            # self.embeddings = pca.fit_transform(self.embeddings)
         else:
             raise ValueError, 'Please, first run read_graphs to create graphs.'
 
@@ -445,16 +446,23 @@ class GraphKernel(object):
 
         n1 = int(alpha * N)  # training number
         n2 = int((1 - alpha) / 2 * N)  # validation number
+
+
         K_train = self.K[:n1, :n1]
         y_train = y[:n1]
         K_val = self.K[n1:(n1 + n2), :n1]
         y_val = y[n1:(n1 + n2)]
+        K_test = self.K[(n1 + n2):, :n1]
+        y_test = y[(n1 + n2):]
         K_train_val = self.K[:(n1 + n2), :(n1+n2)]
         y_train_val = y[:(n1 + n2)]
-        K_test = self.K[(n1 + n2):, :(n1+n2)]
-        y_test = y[(n1 + n2):]
 
         return K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val
+
+    def split2(self, y, alpha = .8):
+        X_train_val, X_test, y_train_val, y_test = train_test_split(self.embeddings, y, test_size = 1 - alpha )
+        X_train, X_val, y_train, y_val = train_test_split(X_train_val, y_train_val, test_size = 1 - alpha)
+        return X_train, X_val, X_test, y_train, y_val, y_test, X_train_val, y_train_val
 
     def run_SVM(self, y, alpha = .8, lower = 10**(-3), upper = 10, num = 10):
         K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val = self.split(y, alpha)
@@ -462,24 +470,33 @@ class GraphKernel(object):
         # C_grid = np.linspace(lower, upper, num=num)
         C_grid = 10.**(-np.arange(-1, 11))
         val_scores = []
+        test_scores = []
         for i in range(len(C_grid)):
             model = svm.SVC(kernel='precomputed', C=C_grid[i])
+            # model = svm.SVC(C=C_grid[i])
             model.fit(K_train, y_train)
 
             y_val_pred = model.predict(K_val)
             val_scores.append(accuracy_score(y_val, y_val_pred))
 
-        max_idx = np.argmax(val_scores)
-        model = svm.SVC(kernel = 'precomputed', C = C_grid[max_idx])
-        model.fit(K_train_val, y_train_val)
+            y_test_pred = model.predict(K_test)
+            test_scores.append(accuracy_score(y_test, y_test_pred))
 
-        y_test_pred = model.predict(K_test)
-        print y_test_pred
-        return val_scores[max_idx], accuracy_score(y_test, y_test_pred), C_grid[max_idx]
+        print 'Last prediction values: ', y_val_pred
+        max_idx = np.argmax(val_scores)
+        return val_scores[max_idx], test_scores[max_idx], C_grid[max_idx]
+
+        # model = svm.SVC(kernel = 'precomputed', C = C_grid[max_idx])
+        # # model = svm.SVC(C=C_grid[max_idx])
+        # model.fit(K_train_val, y_train_val)
+        #
+        # y_test_pred = model.predict(K_test)
+        # print y_test_pred
+        # return val_scores[max_idx], accuracy_score(y_test, y_test_pred), C_grid[max_idx]
 
 
 if __name__ == '__main__':
-    STEPS = 5
+    STEPS = 2
     M = 10
     TRIALS = 10
     KERNEL = 'dot'
@@ -493,38 +510,42 @@ if __name__ == '__main__':
     gk = GraphKernel()
     # gk.read_graphs(filenames = ['bio/mutag/mutag_1.graphml', 'bio/mutag/mutag_188.graphml'], directed = True)
     gk.read_graphs(folder = 'bio/{}'.format(DATASET))
-    # gk.embed_graphs(steps = STEPS, prop=False)
-    # gk.kernel_matrix(kernel_method=KERNEL, steps = STEPS, prop = False)
-    # pca = PCA(n_components=0.9)
-    # pca.fit(gk.embeddings)
-    # print pca.explained_variance_ratio_
-    # X1 = pca.transform(gk.embeddings)
-    # np.savetxt(RESULTS_FOLDER + 'embeddings.txt', X1, fmt = '%.2f')
+    # gk.kernel_matrix(kernel_method=KERNEL, steps = STEPS)
+    # print gk.embeddings, gk.meta
+
 
     # gk.write_kernel_matrix('{}/kernel_{}_{}_{}_labels.txt'.format(RESULTS_FOLDER, DATASET, KERNEL, LABELS))
     # gk.write_embeddings('{}/embeddings_{}_{}_labels.txt'.format(RESULTS_FOLDER, DATASET, LABELS))
 
 
-    with open('bio/' + DATASET + '_label.txt') as f:
-        y = np.array(map(int, f.readlines()[0].split()))
-
-    sigma_grid = np.linspace(10**(-4), 10, num=10)
-    sigma_grid = 10.**(-np.arange(-1, 11))
-    sigma_test_score = []
-    for six in range(len(sigma_grid)):
-        print sigma_grid[six]
-        gk.kernel_matrix(kernel_method=KERNEL, steps=STEPS, prop=True, sigma = sigma_grid[six])
-        tests = []
-        for _ in range(TRIALS):
-            results = gk.run_SVM(y, alpha = .9)
-            tests.append(results[1])
-        print 'Result: ', np.mean(tests)
-        sigma_test_score.append(np.mean(tests))
-
-    max_idx = np.argmax(sigma_test_score)
-    print sigma_test_score[max_idx]
-    print sigma_grid[max_idx]
-    print sigma_test_score
+    # with open('bio/' + DATASET + '_label.txt') as f:
+    #     y = np.array(map(int, f.readlines()[0].split()))
+    #
+    # K = np.loadtxt('mutag_no_labels_ker_mat.txt')
+    # print K.shape
+    # K = np.loadtxt('kernels_rbf/mutag_kernel_wl.txt')
+    # print K.shape
+    #
+    #
+    # sigma_grid = np.linspace(10**(-4), 10, num=10)
+    # sigma_grid = 10.**(-np.arange(1, 11))
+    # sigma_grid = [1]
+    # sigma_test_score = []
+    # for six in range(len(sigma_grid)):
+    #     print 'Sigma:', sigma_grid[six]
+    #     gk.kernel_matrix(kernel_method=KERNEL, steps=STEPS, prop=False, sigma = sigma_grid[six])
+    #     gk.K = K
+    #     tests = []
+    #     for _ in range(TRIALS):
+    #         results = gk.run_SVM(y, alpha = .8)
+    #         tests.append(results[1])
+    #     print 'Result: ', np.mean(tests)
+    #     sigma_test_score.append(np.mean(tests))
+    #
+    # max_idx = np.argmax(sigma_test_score)
+    # print sigma_test_score[max_idx]
+    # print sigma_grid[max_idx]
+    # print sigma_test_score
 
 
 
@@ -538,43 +559,44 @@ if __name__ == '__main__':
     # plt.show()
 
 
-    # for DATASET in ['mutag']: #, 'enzymes', 'DD', 'NCI1', 'NCI109']:
-    #
-    #     with open('bio/' + DATASET + '_label.txt') as f:
-    #         y = np.array(map(int, f.readlines()[0].split()))
-    #
-    #     gk = GraphKernel()
-    #     gk.read_graphs(folder = 'bio/' + DATASET)
-    #
-    #     #TODO: adapt algorithm to consider labels
-    #     for LABELS in [None]: #, 'edges', 'nodes', 'edges_nodes']:
-    #         try:
-    #             gk.kernel_matrix(KERNEL, steps=STEPS, prop=False, labels=LABELS)
-    #
-    #             K = gk.K
-    #             gk.write_kernel_matrix('{}/kernel_{}_{}_{}_labels.txt'.format(RESULTS_FOLDER, DATASET, KERNEL, LABELS))
-    #             gk.write_embeddings('{}/embeddings_{}_{}_labels.txt'.format(RESULTS_FOLDER, DATASET, LABELS))
-    #
-    #             ### K = np.loadtxt('kernels/mutag_kernel_wl.txt')
-    #             ### gk.K = K
-    #
-    #             N, M = K.shape
-    #             print 'Kernel matrix shape: {}x{}'.format(N, M)
-    #
-    #             optimal_val_scores = []
-    #             optimal_test_scores = []
-    #             for _ in range(TRIALS):
-    #                 val, test, C = gk.run_SVM(y, num = 10)
-    #                 optimal_val_scores.append(val)
-    #                 optimal_test_scores.append(test)
-    #                 print val, test, C
-    #
-    #             print 'Average Performance on Validation:', np.mean(optimal_val_scores)
-    #             print 'Average Performance on Test: {:.2f}% +-{:.2f}%'.format(np.mean(optimal_test_scores), np.std(optimal_test_scores))
-    #             with open('{}/performance.txt'.format(RESULTS_FOLDER), 'a') as f:
-    #                 f.write('{} {} {} {}\n'.format(DATASET, LABELS, np.mean(optimal_test_scores), np.std(optimal_test_scores)))
-    #         except Exception, e:
-    #             print e
+    for DATASET in ['mutag']: #, 'enzymes', 'DD', 'NCI1', 'NCI109']:
+
+        with open('bio/' + DATASET + '_label.txt') as f:
+            y = np.array(map(int, f.readlines()[0].split()))
+
+        gk = GraphKernel()
+        gk.read_graphs(folder = 'bio/' + DATASET)
+
+        #TODO: adapt algorithm to consider labels
+        for LABELS in [None]: #, 'edges', 'nodes', 'edges_nodes']:
+            try:
+                # gk.kernel_matrix(KERNEL, steps=STEPS, prop=False, labels=LABELS)
+                #
+                # K = gk.K
+                # gk.write_kernel_matrix('{}/kernel_{}_{}_{}_labels.txt'.format(RESULTS_FOLDER, DATASET, KERNEL, LABELS))
+                # gk.write_embeddings('{}/embeddings_{}_{}_labels.txt'.format(RESULTS_FOLDER, DATASET, LABELS))
+
+                K = np.loadtxt('mutag_wl_ker_mat.txt')
+                gk.K = K
+
+                N, M = K.shape
+                print 'Kernel matrix shape: {}x{}'.format(N, M)
+
+                optimal_val_scores = []
+                optimal_test_scores = []
+                for _ in range(TRIALS):
+                    val, test, C = gk.run_SVM(y, num = 10, alpha = .9)
+                    optimal_val_scores.append(val)
+                    optimal_test_scores.append(test)
+                    print val, test, C
+
+                print 'Average Performance on Validation:', np.mean(optimal_val_scores)
+                print 'Average Performance on Test: {:.2f}% +-{:.2f}%'.format(np.mean(optimal_test_scores), np.std(optimal_test_scores))
+                # with open('{}/performance.txt'.format(RESULTS_FOLDER), 'a') as f:
+                #     f.write('{} {} {} {}\n'.format(DATASET, LABELS, np.mean(optimal_test_scores), np.std(optimal_test_scores)))
+            except Exception, e:
+                print e
+                print 'Exit with error'
 
 
     console = []
