@@ -434,13 +434,14 @@ class GraphKernel(object):
         np.savetxt(filename, self.K, fmt='%.3f')
 
     def split(self, y, alpha = .8):
-        N, M = self.K.shape
+        K = np.copy(self.K)
+        N, M = K.shape
 
         perm = np.random.permutation(N)
         for i in range(N):
-            self.K[:, i] = self.K[perm, i]
+            K[:, i] = K[perm, i]
         for i in range(N):
-            self.K[i, :] = self.K[i, perm]
+            K[i, :] = K[i, perm]
 
         y = y[perm]
 
@@ -448,13 +449,13 @@ class GraphKernel(object):
         n2 = int((1 - alpha) / 2 * N)  # validation number
 
 
-        K_train = self.K[:n1, :n1]
+        K_train = K[:n1, :n1]
         y_train = y[:n1]
-        K_val = self.K[n1:(n1 + n2), :n1]
+        K_val = K[n1:(n1 + n2), :n1]
         y_val = y[n1:(n1 + n2)]
-        K_test = self.K[(n1 + n2):, :n1]
+        K_test = K[(n1 + n2):, :n1]
         y_test = y[(n1 + n2):]
-        K_train_val = self.K[:(n1 + n2), :(n1+n2)]
+        K_train_val = K[:(n1 + n2), :(n1+n2)]
         y_train_val = y[:(n1 + n2)]
 
         return K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val
