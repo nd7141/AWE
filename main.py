@@ -460,7 +460,7 @@ class GraphKernel(object):
 
         return K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val
 
-    def split2(self, y, alpha = .8):
+    def split_embeddings(self, y, alpha = .8):
         X_train_val, X_test, y_train_val, y_test = train_test_split(self.embeddings, y, test_size = 1 - alpha )
         X_train, X_val, y_train, y_val = train_test_split(X_train_val, y_train_val, test_size = 1 - alpha)
         return X_train, X_val, X_test, y_train, y_val, y_test, X_train_val, y_train_val
