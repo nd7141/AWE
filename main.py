@@ -453,7 +453,7 @@ class GraphKernel(object):
         y_train = y[:n1]
         K_val = K[n1:(n1 + n2), :n1]
         y_val = y[n1:(n1 + n2)]
-        K_test = K[(n1 + n2):, :n1]
+        K_test = K[(n1 + n2):, :(n1+n2)]
         y_test = y[(n1 + n2):]
         K_train_val = K[:(n1 + n2), :(n1+n2)]
         y_train_val = y[:(n1 + n2)]
@@ -465,35 +465,45 @@ class GraphKernel(object):
         X_train, X_val, y_train, y_val = train_test_split(X_train_val, y_train_val, test_size = 1 - alpha)
         return X_train, X_val, X_test, y_train, y_val, y_test, X_train_val, y_train_val
 
-    def run_SVM(self, y, alpha = .8, lower = 10**(-3), upper = 10, num = 10):
-        K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val = self.split(y, alpha)
+    def run_SVM(self, y, alpha = .8, features = 'kernels'):
+        # Split the data on Train, Validation, and Test data
+        if features == 'kernels':
+            K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val = self.split(y, alpha)
+        elif features == 'phimap':
+            K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val = self.split_embeddings(y, alpha)
+        else:
+            raise ValueError, 'Possible values of features: kernels, phimap'
 
-        # C_grid = np.linspace(lower, upper, num=num)
         C_grid = 10.**(-np.arange(-1, 11))
         val_scores = []
-        test_scores = []
         for i in range(len(C_grid)):
-            model = svm.SVC(kernel='precomputed', C=C_grid[i])
-            # model = svm.SVC(C=C_grid[i])
+            # Train a model on Train data
+            if features == 'kernels':
+                model = svm.SVC(kernel='precomputed', C=C_grid[i])
+            elif features == 'phimap':
+                model = svm.SVC(C=C_grid[i])
+            else:
+                raise ValueError, 'Possible values of features: kernels, phimap'
             model.fit(K_train, y_train)
 
+            # Predict a model on Validation data
             y_val_pred = model.predict(K_val)
             val_scores.append(accuracy_score(y_val, y_val_pred))
 
-            y_test_pred = model.predict(K_test)
-            test_scores.append(accuracy_score(y_test, y_test_pred))
-
-        print 'Last prediction values: ', y_val_pred
+        # re-train a model on Train + Validation data
         max_idx = np.argmax(val_scores)
-        return val_scores[max_idx], test_scores[max_idx], C_grid[max_idx]
+        if features == 'kernels':
+            model = svm.SVC(kernel = 'precomputed', C = C_grid[max_idx])
+        elif features == 'phimap':
+            model = svm.SVC(C=C_grid[max_idx])
+        else:
+            raise ValueError, 'Possible values of features: kernels, phimap'
+        model.fit(K_train_val, y_train_val)
 
-        # model = svm.SVC(kernel = 'precomputed', C = C_grid[max_idx])
-        # # model = svm.SVC(C=C_grid[max_idx])
-        # model.fit(K_train_val, y_train_val)
-        #
-        # y_test_pred = model.predict(K_test)
-        # print y_test_pred
-        # return val_scores[max_idx], accuracy_score(y_test, y_test_pred), C_grid[max_idx]
+        # Predict the final model on Test data
+        y_test_pred = model.predict(K_test)
+        print y_test_pred
+        return val_scores[max_idx], accuracy_score(y_test, y_test_pred), C_grid[max_idx]
 
 
 if __name__ == '__main__':
@@ -570,34 +580,37 @@ if __name__ == '__main__':
 
         #TODO: adapt algorithm to consider labels
         for LABELS in [None]: #, 'edges', 'nodes', 'edges_nodes']:
-            try:
+            # try:
                 # gk.kernel_matrix(KERNEL, steps=STEPS, prop=False, labels=LABELS)
                 #
                 # K = gk.K
                 # gk.write_kernel_matrix('{}/kernel_{}_{}_{}_labels.txt'.format(RESULTS_FOLDER, DATASET, KERNEL, LABELS))
                 # gk.write_embeddings('{}/embeddings_{}_{}_labels.txt'.format(RESULTS_FOLDER, DATASET, LABELS))
 
-                K = np.loadtxt('mutag_wl_ker_mat.txt')
-                gk.K = K
+            K = np.loadtxt('mutag_wl_ker_mat.txt')
+            gk.K = K
+            # E = np.loadtxt('mutag_wl_phi_map.txt')
+            # gk.embeddings = E.T
 
-                N, M = K.shape
-                print 'Kernel matrix shape: {}x{}'.format(N, M)
 
-                optimal_val_scores = []
-                optimal_test_scores = []
-                for _ in range(TRIALS):
-                    val, test, C = gk.run_SVM(y, num = 10, alpha = .9)
-                    optimal_val_scores.append(val)
-                    optimal_test_scores.append(test)
-                    print val, test, C
+            # N, M = K.shape
+            # print 'Kernel matrix shape: {}x{}'.format(N, M)
 
-                print 'Average Performance on Validation:', np.mean(optimal_val_scores)
-                print 'Average Performance on Test: {:.2f}% +-{:.2f}%'.format(np.mean(optimal_test_scores), np.std(optimal_test_scores))
-                # with open('{}/performance.txt'.format(RESULTS_FOLDER), 'a') as f:
-                #     f.write('{} {} {} {}\n'.format(DATASET, LABELS, np.mean(optimal_test_scores), np.std(optimal_test_scores)))
-            except Exception, e:
-                print e
-                print 'Exit with error'
+            optimal_val_scores = []
+            optimal_test_scores = []
+            for _ in range(TRIALS):
+                val, test, C = gk.run_SVM(y, alpha = .9, features='kernels')
+                optimal_val_scores.append(val)
+                optimal_test_scores.append(test)
+                print val, test, C
+
+            print 'Average Performance on Validation:', np.mean(optimal_val_scores)
+            print 'Average Performance on Test: {:.2f}% +-{:.2f}%'.format(np.mean(optimal_test_scores), np.std(optimal_test_scores))
+            # with open('{}/performance.txt'.format(RESULTS_FOLDER), 'a') as f:
+            #     f.write('{} {} {} {}\n'.format(DATASET, LABELS, np.mean(optimal_test_scores), np.std(optimal_test_scores)))
+            # except Exception, e:
+            #     raise e
+            #     print 'Exit with error'
 
 
     console = []
