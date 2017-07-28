@@ -78,8 +78,8 @@ class Graph2Vec(object):
                         current_step_paths.append(walks + [j])
             last_step_paths = current_step_paths
         # filter only on n-steps walks
-        if keep_last:
-            paths = filter(lambda path: len(path) ==  steps + 1, paths)
+        # if keep_last:
+        #     paths = filter(lambda path: len(path) ==  steps + 1, paths)
         self.paths[steps] = paths
 
     def _all_paths_edges(self, steps):
@@ -220,30 +220,28 @@ class Graph2Vec(object):
             node = v
         return tuple(walk)
 
-    def _sampling(self, steps, M, prop=True):
+    def _sampling(self, steps, MC, prop=True):
         '''Find vector representation using sampling method.
-        Run M random walks with n steps for each node in the graph.
+        Run MC random walks for random nodes in the graph.
         steps is the number of steps.
-        M is the number of iterations.
+        MC is the number of iterations.
         Returns dictionary pattern to probability.
         '''
         walks = dict()
         N = len(self.rw_graph)
-        for node in self.rw_graph:
-            # run M random walks for each node
-            for it in range(M):
-                # run a random walk with n steps, and then look at sub-walks
-                w = self._random_walk_node(node, steps)
-                for length in range(3, len(w) + 1):
-                    w_cropped = w[:length]
-                    amount = 1.
-                    if prop:
-                        amount /= (N * M)
-                    if w_cropped not in walks:
-                        walks[w_cropped] = amount
-                    else:
-                        walks[w_cropped] += amount
-
+        for it in range(MC):
+            node = np.random.choice(self.rw_graph.nodes())
+            # run a random walk with n steps, and then look at sub-walks
+            w = self._random_walk_node(node, steps)
+            for length in range(3, len(w) + 1):
+                w_cropped = w[:length]
+                amount = 1.
+                if prop:
+                    amount /= MC
+                if w_cropped not in walks:
+                    walks[w_cropped] = amount
+                else:
+                    walks[w_cropped] += amount
         return walks
 
     def _exact(self, steps, labels = None, prop = True, verbose = True):
@@ -286,12 +284,12 @@ class Graph2Vec(object):
             print('Total walks of size {} in a graph:'.format(steps), len(all_walks))
         return walks
 
-    def embed(self, method = 'exact', steps = None, M = None, delta = 0.1, eps = 0.1,
+    def embed(self, steps, method = 'exact', MC = None, delta = 0.1, eps = 0.1,
               prop=True, labels = None, keep_last = False, verbose = True):
         '''Generic function to get vector representation.
         method can be sampling, exact
         steps is the number of steps.
-        M is the number of iterations.
+        MC is the number of iterations.
         labels, possible values None (no labels), 'edges', 'nodes', 'edges_nodes'.
         delta is probability devitation from the true distribution of meta-walks
         eps is absolute value for deviation of first norm
@@ -299,11 +297,6 @@ class Graph2Vec(object):
 
         # Create a random walk instance of the graph first
         self.create_random_walk_graph()
-
-        if steps is None:
-            steps = 5
-            if verbose:
-                print("Use default number of steps = {}".format(steps))
 
         if labels is None:
             self._all_paths(steps, keep_last)
@@ -319,11 +312,12 @@ class Graph2Vec(object):
         if method == 'sampling':
             if verbose:
                 print("Use sampling method to get vector representation.")
-            if M is None:
-                M = self.n_samples(steps, delta, eps)
-                print("Use number of iterations = {} for delta = {} and eps = {}".format(M, delta, eps))
+            if MC is None:
+                MC = self.n_samples(steps, delta, eps)
+                if verbose:
+                    print("Using number of iterations = {} for delta = {} and eps = {}".format(MC, delta, eps))
             start = time.time()
-            patterns = self._sampling(steps, M, prop=prop)
+            patterns = self._sampling(steps, MC, prop=prop)
             finish = time.time()
             if verbose:
                 print('Spent {} sec to get vector representation via sampling method.'.format(round(finish - start, 2)))
@@ -395,13 +389,13 @@ class GraphKernel(object):
                         G = self.gv.read_graph_from_text(folder + '/' + item, header, weights, sep, directed)
                     self.graphs.append(G)
 
-    def embed_graphs(self, graph2vec_method = 'exact', steps = 3, M = None, delta = 0.1, eps = 0.1,
+    def embed_graphs(self, graph2vec_method = 'exact', steps = 3, MC = None, delta = 0.1, eps = 0.1,
                      labels=None, prop=True, keep_last = False):
         if hasattr(self, 'graphs'):
             print('Using {} method to get graph embeddings'.format(graph2vec_method))
             N = len(self.graphs)
             self.gv.graph = self.graphs[0]
-            v, d = self.gv.embed(graph2vec_method, steps, M = M, delta = delta, eps = eps, prop=prop, labels=labels, verbose=False, keep_last = keep_last)
+            v, d = self.gv.embed(steps = steps, method = graph2vec_method, MC = MC, delta = delta, eps = eps, prop=prop, labels=labels, verbose=False, keep_last = keep_last)
             L = len(v)
             self.embeddings = np.zeros(shape=(N,L))
             self.embeddings[0] = v
@@ -409,20 +403,19 @@ class GraphKernel(object):
                 if ix % 100 == 0:
                     print 'Processing {} graph'.format(ix)
                 self.gv.graph = G
-                v, d = self.gv.embed(graph2vec_method, steps, M = M, delta = delta, eps = eps, prop=prop, labels=labels, verbose=False, keep_last = keep_last)
+                v, d = self.gv.embed(steps = steps, method = graph2vec_method, MC = MC, delta = delta, eps = eps, prop=prop, labels=labels, verbose=False, keep_last = keep_last)
                 self.embeddings[ix+1] = v
-            self.meta = d
 
             # pca = PCA(n_components=0.9)
             # self.embeddings = pca.fit_transform(self.embeddings)
         else:
             raise ValueError, 'Please, first run read_graphs to create graphs.'
 
-    def kernel_matrix(self, kernel_method = 'rbf', sigma = 1, graph2vec_method = 'exact', steps = 3, M = None, delta = 0.1, eps = 0.1,
+    def kernel_matrix(self, kernel_method = 'rbf', sigma = 1, graph2vec_method = 'exact', steps = 3, MC = None, delta = 0.1, eps = 0.1,
                       prop=True, labels = None, build_embeddings = True, keep_last = False):
 
         if build_embeddings:
-            self.embed_graphs(graph2vec_method, steps, M = M, delta = delta, eps = eps, labels = labels, prop=prop, keep_last=keep_last)
+            self.embed_graphs(graph2vec_method=graph2vec_method, steps=steps, MC = MC, delta = delta, eps = eps, labels = labels, prop=prop, keep_last=keep_last)
 
         N = len(self.graphs)
         self.K = np.zeros(shape=(N,N))
@@ -482,7 +475,7 @@ class GraphKernel(object):
         else:
             raise ValueError, 'Possible values of features: kernels, embeddings'
 
-        C_grid = 10.**(-np.arange(-1, 11))
+        C_grid = [0.001, 0.01, 0.1, 1, 10]
         val_scores = []
         for i in range(len(C_grid)):
             # Train a model on Train data
@@ -515,98 +508,112 @@ class GraphKernel(object):
 
 
 if __name__ == '__main__':
-    STEPS = 5
-    MC = 10
-    TRIALS = 10
-    KERNEL = 'dot'
-    DATASET = 'mutag'
-    RESULTS_FOLDER = 'imdb_action_romance/kernels/'
+    TRIALS = 10 # number of cross-validation
+
+    STEPS = 3
+    KERNEL = 'rbf'
+    DATASET = 'imdb_action_romance'
     METHOD  = 'sampling'
     LABELS = None
-    PROP = False
-
-    if not os.path.exists(RESULTS_FOLDER):
-        os.makedirs(RESULTS_FOLDER)
+    PROP = True
+    MC = None
+    DELTA = 0.1
+    EPSILON = 0.1
 
 
     parser = argparse.ArgumentParser(description = 'Getting classification accuracy for Graph Kernel Methods')
     parser.add_argument('--dataset', default = DATASET, help = 'Dataset with graphs to classify')
+    parser.add_argument('--steps', default = STEPS, help = 'Number of steps for meta-walk', type = int)
     parser.add_argument('--kernel', default = KERNEL, help = 'Kernel type: rbf or dot')
+
     parser.add_argument('--proportion', default = PROP, help = 'Convert embeddings to be in [0,1]', type = bool)
-    parser.add_argument('--method', default = METHOD, help = 'Graph2Vec method: sampling or exact')
     parser.add_argument('--labels', default = LABELS, help = 'Labels: edges, nodes, edges_nodes')
-    parser.add_argument('--MC', default = MC, help = 'Number of times to run random walks for each node')
 
+    parser.add_argument('--method', default=METHOD, help='Graph2Vec method: sampling or exact')
+    parser.add_argument('--MC', default = MC, help = 'Number of times to run random walks for each node', type = int)
+    parser.add_argument('--delta', default=DELTA, help='Probability of error to estimate number of samples.', type = float)
+    parser.add_argument('--epsilon', default=EPSILON, help='Delta of deviation to estimate number of samples.', type = float)
 
-    # run for each dataset
-    # for DATASET in ['imdb_action_romance']: #, 'reddit_multi_5K', 'reddit_subreddit_10K', 'collab']:
-    for DATASET  in ['reddit_multi_5K']:
-        start = time.time()
-        print 'DATASET:', DATASET
+    args = parser.parse_args()
 
-        # create a folder for each dataset with output results
-        RESULTS_FOLDER = '{}/kernels/'.format(DATASET)
-        if not os.path.exists(RESULTS_FOLDER):
-            os.makedirs(RESULTS_FOLDER)
+    STEPS = args.steps
+    KERNEL = args.kernel
+    DATASET = args.dataset
+    METHOD = args.method
+    LABELS = args.labels
+    PROP = args.proportion
+    MC = args.MC
+    DELTA = args.delta
+    EPSILON = args.epsilon
 
-        # read labels for each graph
-        with open(DATASET + '/labels.txt') as f:
-            y = np.array(map(int, f.readlines()))
+    # create a folder for each dataset with output results
+    RESULTS_FOLDER = '{}/kernels/'.format(DATASET)
+    if not os.path.exists(RESULTS_FOLDER):
+        os.makedirs(RESULTS_FOLDER)
 
-        # create an instance of a graph kernel and read all graphs
-        gk = GraphKernel()
-        gk.read_graphs(folder = DATASET, ext='graphml')
+    # read labels for each graph
+    with open(DATASET + '/labels.txt') as f:
+        y = np.array(map(int, f.readlines()))
 
-        print 'Read {} graphs'.format(len(gk.graphs))
+    # create an instance of a graph kernel and read all graphs
+    gk = GraphKernel()
+    gk.read_graphs(folder=DATASET, ext='graphml')
 
-        # calculate embeddings using edges, nodes, edge and node, or no labels.
-        for LABELS in ['edges', 'nodes', 'edges_nodes']:
-            try:
-                # whether to divide embeddings by the number of nodes
-                for PROP in [True]:
-                    flag = True # do not re-calculate embeddings, if were calculated before
-                    # kernels can be rbf or a direct (dot)
-                    for KERNEL in ['rbf']:
-                        if KERNEL == 'rbf':
-                            sigma_grid = [0.1, 1, 10]
-                        else:
-                            sigma_grid = [1]
-                        # cross-validation on sigma
-                        for s_ix in range(len(sigma_grid)):
-                            print DATASET, KERNEL, LABELS, STEPS, PROP, sigma_grid[s_ix]
+    print 'Read {} graphs'.format(len(gk.graphs))
 
-                            start2kernelmatrix = time.time()
-                            gk.kernel_matrix(KERNEL, graph2vec_method='sampling', steps=STEPS, prop=PROP, labels=LABELS,
-                                             sigma = sigma_grid[s_ix], build_embeddings = flag, M = 1, )
-                            print 'Time to compute Kernel Matrix: ', time.time() - start2kernelmatrix
+    if KERNEL == 'rbf':
+        sigma_grid = [0.001, 0.01, 0.1, 1, 10]
+    else:
+        sigma_grid = [1]
 
-                            flag = False
-                            # write kernel matrix and embeddings
-                            gk.write_kernel_matrix('{}/kernel_{}_{}_{}_{}_{:.2f}_labels.txt'.format(RESULTS_FOLDER, DATASET, KERNEL, LABELS, PROP, sigma_grid[s_ix]))
-                            gk.write_embeddings('{}/embeddings_{}_{}_{}_labels.txt'.format(RESULTS_FOLDER, DATASET, LABELS, PROP))
+    try:
+        for LABELS in [None, 'nodes', 'edges', 'edges_nodes']:
+            for PROP in [True, False]:
+                flag = True
+                # cross-validation on sigma
+                for s_ix in range(len(sigma_grid)):
+                    print DATASET, KERNEL, LABELS, STEPS, PROP, sigma_grid[s_ix]
 
+                    start2kernelmatrix = time.time()
+                    gk.kernel_matrix(kernel_method=KERNEL, graph2vec_method=METHOD, steps=STEPS, prop=PROP, labels=LABELS,
+                                     sigma=sigma_grid[s_ix], MC=MC, delta = DELTA, eps = EPSILON,
+                                     build_embeddings=flag, keep_last=False)
+                    finish2kernelmatrix = time.time()
+                    print 'Time to compute Kernel Matrix: ', finish2kernelmatrix - start2kernelmatrix
 
-                            N, M = gk.K.shape
-                            print 'Kernel matrix shape: {}x{}'.format(N, M)
+                    flag = False
+                    # write kernel matrix and embeddings
+                    gk.write_kernel_matrix(
+                        '{}/kernel_{}_{}_{}_{}_{:.2f}_labels.txt'.format(RESULTS_FOLDER, DATASET, KERNEL, LABELS, PROP,
+                                                                         sigma_grid[s_ix]))
+                    gk.write_embeddings('{}/embeddings_{}_{}_{}_labels.txt'.format(RESULTS_FOLDER, DATASET, LABELS, PROP))
 
-                            # run SVM with cross-validation on C
-                            optimal_val_scores = []
-                            optimal_test_scores = []
-                            for _ in range(TRIALS):
-                                val, test, C = gk.run_SVM(y, alpha = .9, features='kernels')
-                                optimal_val_scores.append(val)
-                                optimal_test_scores.append(test)
-                                print val, test, C
+                    N, M = gk.K.shape
+                    print 'Kernel matrix shape: {}x{}'.format(N, M)
 
-                            print 'Average Performance on Validation:', np.mean(optimal_val_scores)
-                            print 'Average Performance on Test: {:.2f}% +-{:.2f}%'.format(np.mean(optimal_test_scores), np.std(optimal_test_scores))
-                            # append results of dataset to the file
-                            with open('{}/performance.txt'.format(RESULTS_FOLDER), 'a') as f:
-                                f.write('{} {} {} {} {} {} {} {}\n'.format(DATASET, KERNEL, LABELS, STEPS, PROP, sigma_grid[s_ix], np.mean(optimal_test_scores), np.std(optimal_test_scores)))
-            except Exception, e:
-                print 'Received an error for:', DATASET, KERNEL, LABELS, STEPS, PROP, sigma_grid[s_ix]
-        print 'Spent {:.2f} sec for {}'.format(time.time() - start, DATASET)
-        print
+                    # run SVM with cross-validation on C
+                    optimal_val_scores = []
+                    optimal_test_scores = []
+                    for _ in range(TRIALS):
+                        start2SVM = time.time()
+                        val, test, C = gk.run_SVM(y, alpha=.9, features='kernels')
+                        finish2SVM = time.time()
+                        print '{} Time to run SVM: {:.2f}'.format(_, finish2SVM - start2SVM)
+                        optimal_val_scores.append(val)
+                        optimal_test_scores.append(test)
+                        print val, test, C
+
+                    print 'Average Performance on Validation:', np.mean(optimal_val_scores)
+                    print 'Average Performance on Test: {:.2f}% +-{:.2f}%'.format(np.mean(optimal_test_scores),
+                                                                                  np.std(optimal_test_scores))
+                    # append results of dataset to the file
+                    with open('{}/performance_{}_{}_{}.txt'.format(RESULTS_FOLDER, DATASET, KERNEL, STEPS), 'a') as f:
+                        f.write('{} {} {} {} {} {} {} {} {}\n'.format(DATASET, KERNEL, LABELS, STEPS, PROP, sigma_grid[s_ix],
+                                                                   np.mean(optimal_test_scores), np.std(optimal_test_scores),
+                                                                      finish2kernelmatrix - start2kernelmatrix))
+    except Exception, e:
+        print 'ERROR FOR', DATASET, KERNEL, LABELS, STEPS, PROP
+
 
 
     console = []
