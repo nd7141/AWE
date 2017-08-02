@@ -361,7 +361,8 @@ class GraphKernel(object):
     def read_graphs(self, filenames = None, folder = None, ext = None, header=True, weights=True, sep=',', directed=False):
         '''Read graph from the list of files or from the folder.
         If filenames is not None, then read graphs from the list in filenames.
-        Then, if folder is not None, then read files from the folder. If extension is specified, then read only files with this extension.'''
+        Then, if folder is not None, then read files from the folder. If extension is specified, then read only files with this extension.
+        If folder is not None, then filenames should be named as follows graph0.graphml and should follow the same order as in labels.txt'''
         if filenames is None and folder is None:
             raise ValueError, "You should provide list of filenames or folder with graphs"
         if filenames is not None:
@@ -374,7 +375,10 @@ class GraphKernel(object):
                 self.graphs.append(G)
         elif folder is not None:
             self.graphs = []
-            for item in os.listdir(folder):
+            # have the same order of graphs as in labels.txt
+            folder_graphs = filter(lambda g: g.endswith(max(ext, '')), os.listdir(folder))
+            sorted_graphs = sorted(folder_graphs, key = lambda g: int(g.split('.')[0][5:]))
+            for item in sorted_graphs:
                 if ext is not None:
                     if item.split('.')[-1] == ext:
                         if ext == 'graphml':
@@ -510,10 +514,10 @@ class GraphKernel(object):
 if __name__ == '__main__':
     TRIALS = 10 # number of cross-validation
 
-    STEPS = 3
+    STEPS = 2
     KERNEL = 'rbf'
     DATASET = 'imdb_action_romance'
-    METHOD  = 'sampling'
+    METHOD  = 'exact'
     LABELS = None
     PROP = True
     MC = None
@@ -547,7 +551,7 @@ if __name__ == '__main__':
     EPSILON = args.epsilon
 
     # create a folder for each dataset with output results
-    RESULTS_FOLDER = '{}/kernels/'.format(DATASET)
+    RESULTS_FOLDER = '{}/kernels_v5/'.format(DATASET)
     if not os.path.exists(RESULTS_FOLDER):
         os.makedirs(RESULTS_FOLDER)
 
@@ -562,7 +566,7 @@ if __name__ == '__main__':
     print 'Read {} graphs'.format(len(gk.graphs))
 
     if KERNEL == 'rbf':
-        sigma_grid = [0.001, 0.01, 0.1, 1, 10]
+        sigma_grid = [0.0001, 0.001, 0.01, 0.1, 1, 10, 20]
     else:
         sigma_grid = [1]
 
