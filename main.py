@@ -1,9 +1,10 @@
+#!opt/conda/bin/python
+
 import networkx as nx
 import random, time, math, os
 import numpy as np
 from sklearn import svm
 from sklearn.metrics import accuracy_score
-import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split
 import argparse
