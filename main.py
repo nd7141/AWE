@@ -568,8 +568,8 @@ class Evaluation(object):
             print(y_test_pred)
         return val_scores[max_idx], accuracy_score(y_test, y_test_pred), C_grid[max_idx]
 
-    def evaluate(self):
-        gen = self.kfold()
+    def evaluate(self, k = 10):
+        gen = self.kfold(k=k)
 
         accs = []
         for ix, (K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val) in enumerate(gen):
@@ -582,12 +582,12 @@ class Evaluation(object):
 if __name__ == '__main__':
     np.random.seed(0)
 
-    TRIALS = 10 # number of cross-validation
+    TRIALS = 1 # number of cross-validation
 
     path_to_datasets = '../Datasets/'
 
-    STEPS = 2
-    KERNEL = 'dot'
+    STEPS = 4
+    KERNEL = 'rbf'
     DATASET = 'ib'
     METHOD  = 'exact'
     LABELS = None
@@ -646,7 +646,8 @@ if __name__ == '__main__':
     # create an instance of a graph kernel and read all graphs
     gk = GraphKernel()
     gk.read_graphs(folder=path_to_datasets + DATASET, ext='graphml')
-    # gk.read_graphs(filenames=[path_to_datasets + DATASET + '/graph{}.graphml'.format(i) for i in range(20)])
+    gk.read_graphs(filenames=[path_to_datasets + DATASET + '/graph{}.graphml'.format(i) for i in range(200)])
+    y = y[:200]
 
     # create an instance of evaluation
 
@@ -654,13 +655,13 @@ if __name__ == '__main__':
     sys.stdout.flush()
 
     if KERNEL == 'rbf':
-        sigma_grid = [0.0001, 0.001, 0.01, 0.1, 1, 10, 20]
+        sigma_grid = [0.00001, 0.0001, 0.001, 0.01, 0.1, 1, 10, 20]
     else:
         sigma_grid = [1]
 
     for LABELS in [None]:#, 'nodes', 'edges', 'edges_nodes']:
         try:
-            for PROP in [True]:#, False]:
+            for PROP in [True, False]:
                 tobuild = True
                 # cross-validation on sigma
                 for s_ix in range(len(sigma_grid)):
@@ -697,17 +698,13 @@ if __name__ == '__main__':
                     # run SVM with cross-validation on C
                     optimal_test_scores = []
                     for _ in range(TRIALS):
-                        print('TRIAL: {}'.format(_))
-                        start2SVM = time.time()
                         accs = ev.evaluate()
                         optimal_test_scores.extend(accs)
-                        finish2SVM = time.time()
-                        print('Time to run k-fold SVM: {:.2f}'.format(finish2SVM - start2SVM))
 
                     del ev # preventing memory leak
 
-                    print('Average Performance on Test: {:.2f}% +-{:.2f}%'.format(np.mean(optimal_test_scores),
-                                                                                  np.std(optimal_test_scores)))
+                    print('Average Performance on Test: {:.2f}% +-{:.2f}%'.format(100*np.mean(optimal_test_scores),
+                                                                                  100*np.std(optimal_test_scores)))
                     sys.stdout.flush()
                     # append results of dataset to the file
                     # with open('{}/performance_{}_{}_{}.txt'.format(RESULTS_FOLDER, DATASET, KERNEL, STEPS), 'a') as f:
