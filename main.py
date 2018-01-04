@@ -470,7 +470,7 @@ class GraphKernel(object):
         if build_embeddings:
             self.embed_graphs(graph2vec_method=graph2vec_method, steps=steps, MC = MC, delta = delta, eps = eps, labels = labels, prop=prop, keep_last=keep_last)
 
-        N = len(self.graphs)
+        N = self.embeddings.shape[0]
         self.K = np.zeros(shape=(N,N))
 
         for i in range(N):

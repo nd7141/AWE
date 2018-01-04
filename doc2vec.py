@@ -3,7 +3,7 @@ Tensorflow implementation of PV-DM algorithm as a scikit-learn like model
 with fit, transform methods.
 
 @author: Zichen Wang (wangzc921@gmail.com)
-@author: Sergey Ivanov (sergei.ivanov@skolkovotech.ru
+@author: Sergey Ivanov (sergei.ivanov@skolkovotech.ru -- Adaptation for graph2vec via AW
 
 
 @references:
@@ -18,26 +18,21 @@ import os
 import math
 import random
 import json
-import collections
-from itertools import compress
+import argparse
+import sys
+import time
 
 import numpy as np
 import tensorflow as tf
 from sklearn.base import BaseEstimator, TransformerMixin
-# from sklearn.metrics.pairwise import pairwise_distances
 
-# from word2vec import build_dataset
-from main import Graph2Vec
-
-# Set random seeds
-SEED = 2018
-random.seed(SEED)
-np.random.seed(SEED)
-
+from main import Graph2Vec, GraphKernel
 
 class Doc2Vec(BaseEstimator, TransformerMixin):
 
-    def __init__(self, batch_size=128,
+    def __init__(self,
+                 dataset='imdb_b',
+                 batch_size=128,
                  window_size=8,
                  concat=False,
                  embedding_size_w=64,
@@ -50,8 +45,7 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
                  ext = 'graphml',
                  steps = 6,
                  epochs = 1,
-                 samples_per_node = 1,
-                 dataset = 'imdb_b'):
+                 samples_per_node = 1):
 
         # bind params to class
         self.batch_size = batch_size
@@ -267,9 +261,142 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
 
 if __name__ == '__main__':
 
-    d2v = Doc2Vec(concat=False)
-    d2v.fit()
-    # print(d2v.doc_embeddings)
-    np.savetxt('embeddings/imdb_b/embeddings.txt', d2v.doc_embeddings, fmt = "%10.5f")
+    # Set random seeds
+    SEED = 2018
+    random.seed(SEED)
+    np.random.seed(SEED)
+
+    dataset = 'imdb_b'
+
+    batch_size = 128
+    window_size = 8
+    embedding_size_w = 128
+    embedding_size_d = 128
+    n_neg_samples = 64
+
+    concat = False
+    loss_type = 'sampled_softmax_loss'
+    optimize = 'Adagrad'
+    learning_rate = 1.0
+    root = '../'
+    ext = 'graphml'
+    steps = 7
+    epochs = 1
+    samples_per_node = 1
+
+    KERNEL = 'rbf'
+    RESULTS_FOLDER = 'doc2vec_results/'
+    TRIALS = 1  # number of cross-validation
+
+    parser = argparse.ArgumentParser(description='Getting classification accuracy for Graph Kernel Methods')
+
+    parser.add_argument('--dataset', default=dataset, help='Dataset with graphs to classify')
+
+    parser.add_argument('--batch_size', default=batch_size, help='Number of steps for meta-walk', type=int)
+    parser.add_argument('--window_size', default=window_size, help='Number of steps for meta-walk', type=int)
+    parser.add_argument('--embedding_size_w', default=embedding_size_w, help='Number of steps for meta-walk', type=int)
+    parser.add_argument('--embedding_size_d', default=embedding_size_d, help='Number of steps for meta-walk', type=int)
+    parser.add_argument('--n_neg_samples', default=n_neg_samples, help='Number of steps for meta-walk', type=int)
+
+    parser.add_argument('--concat', default=concat, help='Convert embeddings to be in [0,1]', type=bool)
+    parser.add_argument('--loss_type', default=loss_type, help='Dataset with graphs to classify')
+    parser.add_argument('--optimize', default=optimize, help='Dataset with graphs to classify')
+    parser.add_argument('--learning_rate', default=learning_rate, help='Dataset with graphs to classify')
+    parser.add_argument('--root', default=root, help='Dataset with graphs to classify')
+    parser.add_argument('--ext', default=ext, help='Dataset with graphs to classify')
+
+    parser.add_argument('--steps', default=steps, help='Dataset with graphs to classify', type=int)
+    parser.add_argument('--epochs', default=epochs, help='Dataset with graphs to classify', type=int)
+    parser.add_argument('--samples_per_node', default=samples_per_node, help='Dataset with graphs to classify', type=int)
+
+    args = parser.parse_args()
+
+    dataset = args.dataset
+
+    batch_size = args.batch_size
+    window_size = args.window_size
+    embedding_size_w = args.embedding_size_w
+    embedding_size_d = args.embedding_size_d
+    n_neg_samples = args.n_neg_samples
+
+    concat = args.concat
+    loss_type = args.loss_type
+    optimize = args.optimize
+    learning_rate = args.learning_rate
+    root = args.root
+    ext = args.ext
+    steps = args.steps
+    epochs = args.epochs
+    samples_per_node = args.samples_per_node
+
+    # initialize model
+    d2v = Doc2Vec(dataset = dataset, batch_size = batch_size, window_size = window_size,
+                  embedding_size_w = embedding_size_w, embedding_size_d = embedding_size_d,
+                  n_neg_samples = n_neg_samples, concat = concat, loss_type = loss_type,
+                  optimize = optimize, learning_rate = learning_rate, root = root,
+                  ext = ext, steps = steps, epochs = epochs, samples_per_node = samples_per_node)
+    start2emb = time.time()
+    d2v.fit() # get embeddings
+    finish2emb = time.time()
+    print('Time to compute embeddings: {:.2f} sec'.format(finish2emb - start2emb))
+
+    # read labels for each graph
+    with open(d2v.folder + '/labels.txt') as f:
+        y = np.array(list(map(int, f.readlines())))
+
+    gk = GraphKernel()
+    gk.embeddings = d2v.doc_embeddings
+    gk.write_embeddings('tmp.txt')
+
+    ################## Estimate results: Classification Accuracy ########################
+    if KERNEL == 'rbf':
+        sigma_grid = [0.0001, 0.001, 0.01, 0.1, 1, 10, 20]
+    else:
+        sigma_grid = [1]
+
+    try:
+        # cross-validation on sigma
+        for s_ix in range(len(sigma_grid)):
+            print('Setup: ',dataset, KERNEL, sigma_grid[s_ix])
+            sys.stdout.flush()
+
+            start2kernelmatrix = time.time()
+            gk.kernel_matrix(kernel_method=KERNEL, build_embeddings=False)
+            finish2kernelmatrix = time.time()
+            print('Time to compute Kernel Matrix: ', finish2kernelmatrix - start2kernelmatrix)
+            sys.stdout.flush()
+
+            # write kernel matrix and embeddings
+            gk.write_kernel_matrix('{}/{}/kernel_{}.txt'.format(RESULTS_FOLDER, dataset, KERNEL, sigma_grid[s_ix]))
+
+            N, M = gk.K.shape
+            print('Kernel matrix shape: {}x{}'.format(N, M))
+            sys.stdout.flush()
+
+            # run SVM with cross-validation on C
+            optimal_val_scores = []
+            optimal_test_scores = []
+            for _ in range(TRIALS):
+                start2SVM = time.time()
+                val, test, C = gk.run_SVM(y, alpha=.9, features='kernels')
+                finish2SVM = time.time()
+                print('{} Time to run SVM: {:.2f}'.format(_, finish2SVM - start2SVM))
+                optimal_val_scores.append(val)
+                optimal_test_scores.append(test)
+                print(val, test, C)
+
+            print('Average Performance on Validation:', np.mean(optimal_val_scores))
+            print('Average Performance on Test: {:.2f}% +-{:.2f}%'.format(np.mean(optimal_test_scores),
+                                                                          np.std(optimal_test_scores)))
+            sys.stdout.flush()
+            # append results of dataset to the file
+            with open('{}/{}/performance_{}_{}_{}.txt'.format(RESULTS_FOLDER, dataset, dataset, KERNEL, steps), 'a') as f:
+                f.write('{} {} {} {} {} {} {}\n'.format(dataset, KERNEL, steps, sigma_grid[s_ix],
+                                                           np.mean(optimal_test_scores), np.std(optimal_test_scores),
+                                                              finish2kernelmatrix - start2kernelmatrix))
+    except Exception as e:
+        print('ERROR FOR', dataset, KERNEL, steps)
+        raise e
+
 
     console = []
