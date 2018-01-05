@@ -61,9 +61,10 @@ class Graph2Vec(object):
         RW = nx.DiGraph()
         for node in self.graph:
             edges = self.graph[node]
-            total = float(sum([edges[v].get(label_name, 1) for v in edges]))
+            total = float(sum([edges[v].get(label_name, 1) for v in edges if v != node]))
             for v in edges:
-                RW.add_edge(node, v, {'weight': edges[v].get(label_name,1) / total})
+                if v != node:
+                    RW.add_edge(node, v, {'weight': edges[v].get(label_name,1) / total})
         self.rw_graph = RW
 
     def _all_paths(self, steps, keep_last = False):
