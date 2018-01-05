@@ -443,9 +443,6 @@ class GraphKernel(object):
                         G = self.gv.read_graph_from_text(folder + '/' + item, header, weights, sep, directed)
                     self.graphs.append(G)
 
-        N = len(self.graphs)
-        self.K = np.zeros(shape=(N, N))
-
     def embed_graphs(self, graph2vec_method = 'exact', steps = 3, MC = None, delta = 0.1, eps = 0.1,
                      labels=None, prop=True, keep_last = False):
         if hasattr(self, 'graphs'):
@@ -470,23 +467,7 @@ class GraphKernel(object):
 
     def kernel_matrix(self, kernel_method = 'rbf', sigma = 1, graph2vec_method = 'exact', steps = 3, MC = None, delta = 0.1, eps = 0.1,
                       prop=True, labels = None, build_embeddings = True, keep_last = False, c=0, d=1):
-        '''
-        
-        :param kernel_method: 'rbf' or 'dot' or 'poly' method for kernel function
-        :param sigma: (optional) sigma value for rbf
-        :param graph2vec_method: how to map to vectors: exact (via path calculation) or sampling
-        :param steps: number of steps in a random walk
-        :param MC: number of Monte-Carlo simulations for sampling method
-        :param delta: delta parameter for calculation of number of simulations
-        :param eps: epsilon parameter for calculation of number of simulations
-        :param prop: if to divide all counts by the total number of walks
-        :param labels: labels in a graph: None (no labels), 'edges', 'nodes', 'edges_nodes'.
-        :param build_embeddings: boolean. If we don't need to recalculate embeddings, then False. Used for rbf.
-        :param keep_last: if we want to keep only random walks of length = steps.
-        :param c: parameter for poly kernel.
-        :param d: parameter for poly kernel. 
-        :return: 
-        '''
+
         if build_embeddings:
             self.embed_graphs(graph2vec_method=graph2vec_method, steps=steps, MC = MC, delta = delta, eps = eps, labels = labels, prop=prop, keep_last=keep_last)
 
@@ -507,22 +488,8 @@ class GraphKernel(object):
     def write_kernel_matrix(self, filename):
         np.savetxt(filename, self.K, fmt='%.3f')
 
-class Evaluation(object):
-
-    def __init__(self, matrix, labels, verbose = False):
-        '''
-        Initialize evaluation.
-        :param matrix: feature matrix (either kernel or embeddings)
-        :param labels: labels for each row
-        '''
-        self.M = matrix
-        self.y = labels
-        self.verbose = verbose
-
-    def split(self, alpha = .8):
-        M = self.M
-        y = self.y
-        K = np.copy(M)
+    def split(self, y, alpha = .8):
+        K = np.copy(self.K)
         N, M = K.shape
 
         perm = np.random.permutation(N)
@@ -548,10 +515,8 @@ class Evaluation(object):
 
         return K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val
 
-    def kfold(self, k=10):
-        M = self.M
-        y = self.y
-        K = np.copy(M)
+    def kfold(self, y, k=10):
+        K = np.copy(self.K)
         N, M = K.shape
 
         perm = np.random.permutation(N)
@@ -565,40 +530,46 @@ class Evaluation(object):
         test_idx = [(N//k)*ix for ix in range(k)] + [N]
         for ix in range(k):
             test_range = list(range(test_idx[ix], test_idx[ix+1]))
+            K_test = K[np.ix_(test_range, test_range)]
+            y_test = y[test_range]
 
             train_val_range = [ix for ix in range(N) if ix not in test_range]
             K_train_val = K[np.ix_(train_val_range, train_val_range)]
             y_train_val = y[train_val_range]
-
-            K_test = K[np.ix_(test_range, train_val_range)]
-            y_test = y[test_range]
 
             val_range = random.sample(train_val_range, N//k)
             train_range = [ix for ix in train_val_range if ix not in val_range]
             K_train = K[np.ix_(train_range, train_range)]
             y_train = y[train_range]
 
-            K_val = K[np.ix_(val_range, train_range)]
+            K_val = K[np.ix_(val_range, val_range)]
             y_val = y[val_range]
             yield K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val
 
-    def split_embeddings(self, alpha = .8):
-        M = self.M
-        y = self.y
-        X_train_val, X_test, y_train_val, y_test = train_test_split(M, y, test_size = 1 - alpha )
+    def split_embeddings(self, y, alpha = .8):
+        X_train_val, X_test, y_train_val, y_test = train_test_split(self.embeddings, y, test_size = 1 - alpha )
         X_train, X_val, y_train, y_val = train_test_split(X_train_val, y_train_val, test_size = 1 - alpha)
         return X_train, X_val, X_test, y_train, y_val, y_test, X_train_val, y_train_val
 
-    def run_SVM(self,
-                K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val):
-        '''Run SVM on feature matrix (kernel or embeddings) using train-test split.'''
-        M, y = self.M, self.y
+    def run_SVM(self, y, alpha = .8, features = 'kernels'):
+        # Split the data on Train, Validation, and Test data
+        if features == 'kernels':
+            K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val = self.split(y, alpha)
+        elif features == 'embeddings':
+            K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val = self.split_embeddings(y, alpha)
+        else:
+            raise ValueError('Possible values of features: kernels, embeddings')
 
         C_grid = [0.001, 0.01, 0.1, 1, 10]
         val_scores = []
         for i in range(len(C_grid)):
             # Train a model on Train data
-            model = svm.SVC(kernel='precomputed', C=C_grid[i])
+            if features == 'kernels':
+                model = svm.SVC(kernel='precomputed', C=C_grid[i])
+            elif features == 'embeddings':
+                model = svm.SVC(C=C_grid[i])
+            else:
+                raise ValueError('Possible values of features: kernels, embeddings')
             model.fit(K_train, y_train)
 
             # Predict a model on Validation data
@@ -607,36 +578,28 @@ class Evaluation(object):
 
         # re-train a model on Train + Validation data
         max_idx = np.argmax(val_scores)
-        model = svm.SVC(kernel = 'precomputed', C = C_grid[max_idx])
+        if features == 'kernels':
+            model = svm.SVC(kernel = 'precomputed', C = C_grid[max_idx])
+        elif features == 'embeddings':
+            model = svm.SVC(C=C_grid[max_idx])
+        else:
+            raise ValueError('Possible values of features: kernels, embeddings')
         model.fit(K_train_val, y_train_val)
 
         # Predict the final model on Test data
         y_test_pred = model.predict(K_test)
-        if self.verbose:
-            print(y_test_pred)
+        print(y_test_pred)
         return val_scores[max_idx], accuracy_score(y_test, y_test_pred), C_grid[max_idx]
 
-    def evaluate(self, k = 10):
-        gen = self.kfold(k=k)
-
-        accs = []
-        for ix, (K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val) in enumerate(gen):
-            val, acc, c_max = self.run_SVM(K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val)
-            accs.append(acc)
-            if self.verbose:
-                print("Scored {} on validation and {} on test with C = {}".format(val, acc, c_max))
-        return accs
 
 if __name__ == '__main__':
     np.random.seed(0)
 
-    TRIALS = 1 # number of cross-validation
+    TRIALS = 10 # number of cross-validation
 
-    path_to_datasets = '../Datasets/'
-
-    STEPS = 4
+    STEPS = 2
     KERNEL = 'rbf'
-    DATASET = 'ib'
+    DATASET = 'imdb_binary'
     METHOD  = 'exact'
     LABELS = None
     PROP = True
@@ -678,60 +641,58 @@ if __name__ == '__main__':
 
 
     ###### tests
+    gk = GraphKernel()
+    N = 10
+    A = np.reshape(range(N**2), (N, N))
+    y = np.reshape(range(N), (N, 1))
+    gk.K = A
+    gen = gk.kfold(y, k = 4)
+    for i, res in enumerate(gen):
+        print(i, res[0].shape)
+
+    exit(0)
     ######
 
 
     # create a folder for each dataset with output results
-    # RESULTS_FOLDER = '{}/kernels_v5/'.format(DATASET)
-    # if not os.path.exists(RESULTS_FOLDER):
-    #     os.makedirs(RESULTS_FOLDER)
+    RESULTS_FOLDER = '{}/kernels_v5/'.format(DATASET)
+    if not os.path.exists(RESULTS_FOLDER):
+        os.makedirs(RESULTS_FOLDER)
 
     # read labels for each graph
-    labels_file = path_to_datasets + DATASET + '/labels.txt'
-    with open(labels_file) as f:
-        y = np.array(list(map(int, f.readlines())))
+    with open(DATASET + '/labels.txt') as f:
+        y = np.array(map(int, f.readlines()))
 
     # create an instance of a graph kernel and read all graphs
     gk = GraphKernel()
-    gk.read_graphs(folder=path_to_datasets + DATASET, ext='graphml')
-    gk.read_graphs(filenames=[path_to_datasets + DATASET + '/graph{}.graphml'.format(i) for i in range(200)])
-    y = y[:200]
-
-    # create an instance of evaluation
+    gk.read_graphs(folder=DATASET, ext='graphml')
 
     print('Read {} graphs'.format(len(gk.graphs)))
     sys.stdout.flush()
 
     if KERNEL == 'rbf':
-        sigma_grid = [0.00001, 0.0001, 0.001, 0.01, 0.1, 1, 10, 20]
+        sigma_grid = [0.0001, 0.001, 0.01, 0.1, 1, 10, 20]
     else:
         sigma_grid = [1]
 
     for LABELS in [None]:#, 'nodes', 'edges', 'edges_nodes']:
         try:
             for PROP in [True, False]:
-                tobuild = True
+                flag = True
                 # cross-validation on sigma
                 for s_ix in range(len(sigma_grid)):
-                    print('''
-                            Dataset: {}
-                            Kernel: {}
-                            Labels: {}
-                            Steps: {}
-                            Prop: {}
-                            sigma: {}'''.format(
-                        DATASET, KERNEL, LABELS, STEPS, PROP, sigma_grid[s_ix]))
+                    print(DATASET, KERNEL, LABELS, STEPS, PROP, sigma_grid[s_ix])
                     sys.stdout.flush()
 
                     start2kernelmatrix = time.time()
                     gk.kernel_matrix(kernel_method=KERNEL, graph2vec_method=METHOD, steps=STEPS, prop=PROP, labels=LABELS,
                                      sigma=sigma_grid[s_ix], MC=MC, delta = DELTA, eps = EPSILON,
-                                     build_embeddings=tobuild, keep_last=False, c = C, d = D)
+                                     build_embeddings=flag, keep_last=False, c = C, d = D)
                     finish2kernelmatrix = time.time()
                     print('Time to compute Kernel Matrix: ', finish2kernelmatrix - start2kernelmatrix)
                     sys.stdout.flush()
 
-                    tobuild = False
+                    flag = False
                     # write kernel matrix and embeddings
                     # gk.write_kernel_matrix(
                     #     '{}/kernel_{}_{}_{}_{}_{:.2f}_labels.txt'.format(RESULTS_FOLDER, DATASET, KERNEL, LABELS, PROP,
@@ -742,26 +703,29 @@ if __name__ == '__main__':
                     print('Kernel matrix shape: {}x{}'.format(N, M))
                     sys.stdout.flush()
 
-                    ev = Evaluation(gk.K, y)
                     # run SVM with cross-validation on C
+                    optimal_val_scores = []
                     optimal_test_scores = []
                     for _ in range(TRIALS):
-                        accs = ev.evaluate()
-                        optimal_test_scores.extend(accs)
+                        start2SVM = time.time()
+                        val, test, C = gk.run_SVM(y, alpha=.9, features='kernels')
+                        finish2SVM = time.time()
+                        print('{} Time to run SVM: {:.2f}'.format(_, finish2SVM - start2SVM))
+                        optimal_val_scores.append(val)
+                        optimal_test_scores.append(test)
+                        print(val, test, C)
 
-                    del ev # preventing memory leak
-
-                    print('Average Performance on Test: {:.2f}% +-{:.2f}%'.format(100*np.mean(optimal_test_scores),
-                                                                                  100*np.std(optimal_test_scores)))
+                    print('Average Performance on Validation:', np.mean(optimal_val_scores))
+                    print('Average Performance on Test: {:.2f}% +-{:.2f}%'.format(np.mean(optimal_test_scores),
+                                                                                  np.std(optimal_test_scores)))
                     sys.stdout.flush()
                     # append results of dataset to the file
-                    # with open('{}/performance_{}_{}_{}.txt'.format(RESULTS_FOLDER, DATASET, KERNEL, STEPS), 'a') as f:
-                    #     f.write('{} {} {} {} {} {} {} {} {} {}\n'.format(DATASET, KERNEL, LABELS, STEPS, PROP, METHOD, sigma_grid[s_ix],
-                    #                                                np.mean(optimal_test_scores), np.std(optimal_test_scores),
-                    #                                                   finish2kernelmatrix - start2kernelmatrix))
+                    with open('{}/performance_{}_{}_{}.txt'.format(RESULTS_FOLDER, DATASET, KERNEL, STEPS), 'a') as f:
+                        f.write('{} {} {} {} {} {} {} {} {} {}\n'.format(DATASET, KERNEL, LABELS, STEPS, PROP, METHOD, sigma_grid[s_ix],
+                                                                   np.mean(optimal_test_scores), np.std(optimal_test_scores),
+                                                                      finish2kernelmatrix - start2kernelmatrix))
         except Exception as e:
             print('ERROR FOR', DATASET, KERNEL, LABELS, STEPS, PROP)
-            raise(e)
 
 
 
