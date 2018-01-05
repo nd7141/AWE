@@ -61,9 +61,10 @@ class Graph2Vec(object):
         RW = nx.DiGraph()
         for node in self.graph:
             edges = self.graph[node]
-            total = float(sum([edges[v].get(label_name, 1) for v in edges]))
+            total = float(sum([edges[v].get(label_name, 1) for v in edges if v != node]))
             for v in edges:
-                RW.add_edge(node, v, {'weight': edges[v].get(label_name,1) / total})
+                if v != node:
+                    RW.add_edge(node, v, {'weight': edges[v].get(label_name,1) / total})
         self.rw_graph = RW
 
     def _all_paths(self, steps, keep_last = False):
@@ -221,6 +222,54 @@ class Graph2Vec(object):
             node = v
         return tuple(walk)
 
+    def generate_batch_pvdm(self, batch_size, window_size, steps, walk_ids, doc_id):
+        '''
+        Generates a (random) batch and labels for doc2vec PV-DM.
+        reference: https://arxiv.org/abs/1405.4053
+
+        Batch is a numpy matrix of shape (batch_size, window_size + 1).
+        Each row is a context words (AW) that co-occur with a target word.
+        To form context, batch generates a sample of random walks and converts then into AW.
+        All, except the last AW, are considered to be context words.
+        Last AW is considered to be the label.
+        The last column of batch corresponds to doc_id, i.e. id of the whole graph.
+
+        :param batch_size: number of samples in the batch.
+        :param window_size: number of context words.
+        :param steps: number of steps in a random walk. The bigger steps, the more possible words we have. Only walks
+        of length = steps are considered for context words.
+        :param walk_ids: dictionary between AW and its id. AW corresponds to a possible word.
+        :param doc_id: the id of the graph.
+        :return: batch (batch_size, window_size + 1) numpy array with batches for doc2vec
+                 labels (batch_size, 1) numpy array with target words for doc2vec
+        '''
+
+        if self.rw_graph is None:
+            raise ValueError("Create a Random Walk graph first with {}".format(self.create_random_walk_graph.__name__))
+        if steps not in self.paths:
+            raise ValueError("Create all possible AW first with {}".format(self._all_paths.__name__))
+
+        batch = np.ndarray(shape=(batch_size, window_size + 1), dtype=np.int32)
+        labels = np.ndarray(shape=(batch_size, 1), dtype=np.int32)
+
+        batch[:, window_size] = doc_id # last column is for document id
+
+        # create a batch and labels
+        i = 0 # number of samples in the batch
+        while i < batch_size:
+            node = random.choice(self.rw_graph.nodes()) # choose random node
+            # generate random walk from this node
+            for j in range(window_size + 1):
+                aw = self._random_walk_node(node, steps)
+                if j < window_size:
+                    batch[i, j] = walk_ids[aw] # for leading words
+                else:
+                    labels[i, 0] = walk_ids[aw] # for target word
+            i += 1
+        return batch, labels
+
+
+
     def _sampling(self, steps, MC, prop=True):
         '''Find vector representation using sampling method.
         Run MC random walks for random nodes in the graph.
@@ -331,8 +380,7 @@ class Graph2Vec(object):
             if verbose:
                 print('Spent {} sec to get vector representation via exact method.'.format(round(finish - start, 2)))
         else:
-            raise ValueError(
-                "Wrong method for Graph2Vec.\n You should choose between {} methods".format(', '.join(self.__methods)))
+            raise ValueError("Wrong method for Graph2Vec.\n You should choose between {} methods".format(', '.join(self.__methods)))
 
 
         vector = []
@@ -358,8 +406,7 @@ class GraphKernel(object):
         elif method == 'rbf':
             return np.exp(-np.linalg.norm(np.array(v1) - v2) ** 2 / sigma)
         else:
-            raise ValueError(
-                "Wrong method for Graph Kernel.\n You should choose between {} methods".format(', '.join(self.__methods)))
+            raise ValueError("Wrong method for Graph Kernel.\n You should choose between {} methods".format(', '.join(self.__methods)))
 
     def read_graphs(self, filenames = None, folder = None, ext = None, header=True, weights=True, sep=',', directed=False):
         '''Read graph from the list of files or from the folder.
@@ -443,7 +490,8 @@ class GraphKernel(object):
         if build_embeddings:
             self.embed_graphs(graph2vec_method=graph2vec_method, steps=steps, MC = MC, delta = delta, eps = eps, labels = labels, prop=prop, keep_last=keep_last)
 
-        N = len(self.graphs)
+        N = self.embeddings.shape[0]
+        self.K = np.zeros(shape=(N,N))
 
         for i in range(N):
             for j in range(i, N):
