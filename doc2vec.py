@@ -21,12 +21,15 @@ import json
 import argparse
 import sys
 import time
+import threading
 
 import numpy as np
 import tensorflow as tf
 from sklearn.base import BaseEstimator, TransformerMixin
 
 from main import Graph2Vec, GraphKernel
+
+SEED = 2018
 
 class Doc2Vec(BaseEstimator, TransformerMixin):
 
@@ -45,7 +48,8 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
                  ext = 'graphml',
                  steps = 6,
                  epochs = 1,
-                 samples_per_node = 1):
+                 samples = None,
+                 concurrent_steps = 8):
 
         # bind params to class
         self.batch_size = batch_size
@@ -62,8 +66,15 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
         self.ext = ext
         self.steps = steps
         self.epochs = epochs
-        self.samples_per_node = samples_per_node
         self.dataset = dataset
+
+        self.concurrent_steps = concurrent_steps
+        self.samples = samples
+
+        # switch to have samples = N for every graph with N nodes
+        self.flag2samples = False
+        if samples is None:
+            self.flag2samples = True
 
 
         # get all graph filenames (document size)
@@ -72,7 +83,7 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
 
         self.sorted_graphs = sorted(folder_graphs, key=lambda g: int(g.split('.')[0][5:]))
         self.document_size = len(self.sorted_graphs)
-        print(self.document_size)
+        print('Number of graphs: {}'.format(self.document_size))
 
         # get all AW (vocabulary size)
         self.g2v = Graph2Vec()
@@ -81,8 +92,7 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
         for i, path in enumerate(self.g2v.paths[self.steps]):
             self.walk_ids[tuple(path)] = i
         self.vocabulary_size = max(self.walk_ids.values()) + 1
-        print(self.walk_ids)
-        print(self.vocabulary_size)
+        print('Number of words: {}'.format(self.vocabulary_size))
 
 
 
@@ -173,6 +183,61 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
             # create a saver
             self.saver = tf.train.Saver()
 
+    def _train_thread_body(self):
+        while True:
+            batch_data, batch_labels = self.g2v.generate_batch_pvdm(batch_size=self.batch_size,
+                                                                    window_size=self.window_size,
+                                                                    steps=self.steps, walk_ids=self.walk_ids,
+                                                                    doc_id=self.doc_id)
+            feed_dict = {self.train_dataset: batch_data, self.train_labels: batch_labels}
+            op, l = self.sess.run([self.optimizer, self.loss], feed_dict=feed_dict)
+            self.sample += 1
+            self.global_step += 1
+
+            print('Thread: {}, Doc-id: {}, Samples: {}/{}'.format(threading.currentThread().getName(), self.doc_id, self.sample, self.samples))
+
+            self.average_loss += l
+            if self.global_step % 100 == 0:
+                # The average loss is an estimate of the loss over the last 2000 batches.
+                print('Average loss at step %d: %f' % (self.global_step, self.average_loss))
+                self.average_loss = 0
+
+            if self.sample >= self.samples:
+                break
+
+    def train(self):
+        # with self.sess as session:
+        session = self.sess
+
+        session.run(self.init_op)
+
+        self.average_loss = 0
+        self.global_step = 0
+        print('Initialized')
+        for _ in range(self.epochs):
+            print('Epoch: {}'.format(_))
+            for doc_id, graph_fn in enumerate(self.sorted_graphs):
+                self.sample = 0
+                self.doc_id = doc_id
+                self.g2v.read_graphml(self.folder + graph_fn)
+                self.g2v.create_random_walk_graph()
+
+                print('Graph {}: {} nodes'.format(doc_id, len(self.g2v.rw_graph)))
+                if self.flag2samples == True: # take sample of N words per each graph with N nodes
+                    self.samples = len(self.g2v.rw_graph)
+                workers = []
+                for _ in range(self.concurrent_steps):
+                    t = threading.Thread(target=self._train_thread_body)
+                    workers.append(t)
+                    t.start()
+
+                for t in workers:
+                    t.join()
+
+        self.doc_embeddings = session.run(self.normalized_doc_embeddings)
+
+        return self
+
     def fit(self):
 
         # with self.sess as session:
@@ -188,8 +253,7 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
             for doc_id, graph_fn in enumerate(self.sorted_graphs):
                 self.g2v.read_graphml(self.folder + graph_fn)
                 self.g2v.create_random_walk_graph()
-
-                N = len(self.g2v.rw_graph)*self.samples_per_node
+                N = len(self.g2v.rw_graph)
                 print('Graph {}: {} nodes'.format(doc_id, len(self.g2v.rw_graph)))
                 for b in range(N):
                     batch_data, batch_labels = self.g2v.generate_batch_pvdm(batch_size=self.batch_size,
@@ -282,32 +346,34 @@ if __name__ == '__main__':
     ext = 'graphml'
     steps = 7
     epochs = 1
-    samples_per_node = 1
+    samples = 100
+    concurrent_steps = 8
 
     KERNEL = 'rbf'
     RESULTS_FOLDER = 'doc2vec_results/'
-    TRIALS = 1  # number of cross-validation
+    TRIALS = 10  # number of cross-validation
 
     parser = argparse.ArgumentParser(description='Getting classification accuracy for Graph Kernel Methods')
 
     parser.add_argument('--dataset', default=dataset, help='Dataset with graphs to classify')
 
-    parser.add_argument('--batch_size', default=batch_size, help='Number of steps for meta-walk', type=int)
-    parser.add_argument('--window_size', default=window_size, help='Number of steps for meta-walk', type=int)
-    parser.add_argument('--embedding_size_w', default=embedding_size_w, help='Number of steps for meta-walk', type=int)
-    parser.add_argument('--embedding_size_d', default=embedding_size_d, help='Number of steps for meta-walk', type=int)
-    parser.add_argument('--n_neg_samples', default=n_neg_samples, help='Number of steps for meta-walk', type=int)
+    parser.add_argument('--batch_size', default=batch_size, help='Number of target words in a batch', type=int)
+    parser.add_argument('--window_size', default=window_size, help='Number of context words for target', type=int)
+    parser.add_argument('--embedding_size_w', default=embedding_size_w, help='Dimension of word embeddings', type=int)
+    parser.add_argument('--embedding_size_d', default=embedding_size_d, help='Dimension of document embeddings', type=int)
+    parser.add_argument('--n_neg_samples', default=n_neg_samples, help='Number of negative samples', type=int)
 
-    parser.add_argument('--concat', default=concat, help='Convert embeddings to be in [0,1]', type=bool)
-    parser.add_argument('--loss_type', default=loss_type, help='Dataset with graphs to classify')
-    parser.add_argument('--optimize', default=optimize, help='Dataset with graphs to classify')
-    parser.add_argument('--learning_rate', default=learning_rate, help='Dataset with graphs to classify')
-    parser.add_argument('--root', default=root, help='Dataset with graphs to classify')
-    parser.add_argument('--ext', default=ext, help='Dataset with graphs to classify')
+    parser.add_argument('--concat', default=concat, help='Concatenate or Average context words', type=bool)
+    parser.add_argument('--loss_type', default=loss_type, help='sampled_softmax_loss or nce_loss')
+    parser.add_argument('--optimize', default=optimize, help='Adagrad or SGD')
+    parser.add_argument('--learning_rate', default=learning_rate, help='Learning rate of optimizer')
+    parser.add_argument('--root', default=root, help='Root folder of dataset')
+    parser.add_argument('--ext', default=ext, help='Extension of graph filenames')
 
-    parser.add_argument('--steps', default=steps, help='Dataset with graphs to classify', type=int)
-    parser.add_argument('--epochs', default=epochs, help='Dataset with graphs to classify', type=int)
-    parser.add_argument('--samples_per_node', default=samples_per_node, help='Dataset with graphs to classify', type=int)
+    parser.add_argument('--steps', default=steps, help='Number of steps for AW', type=int)
+    parser.add_argument('--epochs', default=epochs, help='Number of epochs to train', type=int)
+    parser.add_argument('--samples', default=samples, help='Number of samples for each graph', type=int)
+    parser.add_argument('--concurrent', default=concurrent_steps, help='Number of threads', type=int)
 
     args = parser.parse_args()
 
@@ -327,16 +393,17 @@ if __name__ == '__main__':
     ext = args.ext
     steps = args.steps
     epochs = args.epochs
-    samples_per_node = args.samples_per_node
+    samples = args.samples
+    concurrent_steps = args.concurrent
 
     # initialize model
     d2v = Doc2Vec(dataset = dataset, batch_size = batch_size, window_size = window_size,
                   embedding_size_w = embedding_size_w, embedding_size_d = embedding_size_d,
                   n_neg_samples = n_neg_samples, concat = concat, loss_type = loss_type,
                   optimize = optimize, learning_rate = learning_rate, root = root,
-                  ext = ext, steps = steps, epochs = epochs, samples_per_node = samples_per_node)
+                  ext = ext, steps = steps, epochs = epochs, samples = samples, concurrent_steps=concurrent_steps)
     start2emb = time.time()
-    d2v.fit() # get embeddings
+    d2v.train() # get embeddings
     finish2emb = time.time()
     print('Time to compute embeddings: {:.2f} sec'.format(finish2emb - start2emb))
 
@@ -397,6 +464,5 @@ if __name__ == '__main__':
     except Exception as e:
         print('ERROR FOR', dataset, KERNEL, steps)
         raise e
-
 
     console = []
