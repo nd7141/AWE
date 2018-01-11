@@ -10,6 +10,9 @@ from sklearn.model_selection import train_test_split
 import argparse
 
 class Graph2Vec(object):
+    '''
+    Computes Anonymous Walk Embeddings of a Graph.
+    '''
     def __init__(self, G = None):
         self._graph = G
         # paths are dictionary between step and all-paths
@@ -222,7 +225,7 @@ class Graph2Vec(object):
             node = v
         return tuple(walk)
 
-    def generate_batch_pvdm(self, batch_size, window_size, steps, walk_ids, doc_id):
+    def generate_random_batch(self, batch_size, window_size, steps, walk_ids, doc_id):
         '''
         Generates a (random) batch and labels for doc2vec PV-DM.
         reference: https://arxiv.org/abs/1405.4053
@@ -258,17 +261,37 @@ class Graph2Vec(object):
         i = 0 # number of samples in the batch
         while i < batch_size:
             node = random.choice(self.rw_graph.nodes()) # choose random node
-            # generate random walk from this node
-            for j in range(window_size + 1):
-                aw = self._random_walk_node(node, steps)
-                if j < window_size:
-                    batch[i, j] = walk_ids[aw] # for leading words
-                else:
-                    labels[i, 0] = walk_ids[aw] # for target word
+            # generate anonymous walks from this node
+            aw = [walk_ids[self._random_walk_node(node, steps)] for _ in range(window_size + 1)]
+            batch[i, :window_size] = aw[:window_size]
+            labels[i, 0] = aw[window_size]
             i += 1
         return batch, labels
 
+    def generate_graph_batch(self, window_size, steps, walk_ids, doc_id):
+        '''
+        Generate a batch with N (# nodes) samples (one per node)
+        '''
 
+        if self.rw_graph is None:
+            raise ValueError("Create a Random Walk graph first with {}".format(self.create_random_walk_graph.__name__))
+        if steps not in self.paths:
+            raise ValueError("Create all possible AW first with {}".format(self._all_paths.__name__))
+
+        N = len(self.rw_graph) # nodes
+
+        batch = np.ndarray(shape=(N, window_size + 1), dtype=np.int32)
+        labels = np.ndarray(shape=(N, 1), dtype=np.int32)
+
+        batch[:, window_size] = doc_id # last column is for document id
+
+        # create a batch and labels
+        for i, node in enumerate(self.rw_graph):
+            # generate anonymous walks from this node
+            aw = [walk_ids[self._random_walk_node(node, steps)] for _ in range(window_size + 1)]
+            batch[i, :window_size] = aw[:window_size]
+            labels[i, 0] = aw[window_size]
+        return batch, labels
 
     def _sampling(self, steps, MC, prop=True):
         '''Find vector representation using sampling method.
@@ -391,6 +414,16 @@ class Graph2Vec(object):
         return vector, {'meta-paths': self.paths[steps]}
 
 class GraphKernel(object):
+    '''
+    Calculates a kernel matrix.
+    It has methods for:
+        - reading graphs from the files (read_graphs())
+        - calculating embeddings of graphs based on AWE GK
+        - calculating kernel matrix for given matrix of 
+            embeddings (so you can provide you own embeddings 
+            matrix E by self.embeddings = E)
+        - saving/loading embeddings/kernel matrix to the file in compressed format          
+    '''
     def __init__(self, graphs = None):
         self.gv = Graph2Vec()
         self.graphs = graphs
@@ -466,7 +499,7 @@ class GraphKernel(object):
             raise ValueError('Please, first run read_graphs to create graphs.')
 
     def kernel_matrix(self, kernel_method = 'rbf', sigma = 1, graph2vec_method = 'exact', steps = 3, MC = None, delta = 0.1, eps = 0.1,
-                      prop=True, labels = None, build_embeddings = True, keep_last = False, c=0, d=1):
+                      prop=True, labels = None, build_embeddings = True, keep_last = False, c=0, d=2):
 
         if build_embeddings:
             self.embed_graphs(graph2vec_method=graph2vec_method, steps=steps, MC = MC, delta = delta, eps = eps, labels = labels, prop=prop, keep_last=keep_last)
@@ -483,13 +516,41 @@ class GraphKernel(object):
                 self.K[j, i] = prod
 
     def write_embeddings(self, filename):
-        np.savetxt(filename, self.embeddings, fmt='%.3f')
+        np.savez_compressed(filename, E=self.embeddings)
 
     def write_kernel_matrix(self, filename):
-        np.savetxt(filename, self.K, fmt='%.3f')
+        np.savez_compressed(filename, K = self.K)
 
-    def split(self, y, alpha = .8):
-        K = np.copy(self.K)
+    def load_embeddings(self, filename):
+        self.embeddings = np.load(filename)['E']
+        return self.embeddings
+
+    def load_kernel_matrix(self, filename):
+        self.K = np.load(filename)['K']
+        return self.K
+
+class Evaluation(object):
+    '''
+    Evaluating a Kernel matrix on SVM classification accuracy.
+    
+    By providing a Kernel matrix M and labels y on initialization, 
+    you can run self.evaluate(k=10) to get accuracy results on k=10
+    cross validation test sets of your matrix.
+    '''
+    def __init__(self, matrix, labels, verbose=False):
+        '''
+        Initialize evaluation.
+        :param matrix: feature matrix (either kernel or embeddings)
+        :param labels: labels for each row
+        '''
+        self.M = matrix
+        self.y = labels
+        self.verbose = verbose
+
+    def split(self, alpha=.8):
+        M = self.M
+        y = self.y
+        K = np.copy(M)
         N, M = K.shape
 
         perm = np.random.permutation(N)
@@ -503,20 +564,21 @@ class GraphKernel(object):
         n1 = int(alpha * N)  # training number
         n2 = int((1 - alpha) / 2 * N)  # validation number
 
-
         K_train = K[:n1, :n1]
         y_train = y[:n1]
         K_val = K[n1:(n1 + n2), :n1]
         y_val = y[n1:(n1 + n2)]
-        K_test = K[(n1 + n2):, :(n1+n2)]
+        K_test = K[(n1 + n2):, :(n1 + n2)]
         y_test = y[(n1 + n2):]
-        K_train_val = K[:(n1 + n2), :(n1+n2)]
+        K_train_val = K[:(n1 + n2), :(n1 + n2)]
         y_train_val = y[:(n1 + n2)]
 
         return K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val
 
-    def kfold(self, y, k=10):
-        K = np.copy(self.K)
+    def kfold(self, k=10):
+        M = self.M
+        y = self.y
+        K = np.copy(M)
         N, M = K.shape
 
         perm = np.random.permutation(N)
@@ -527,49 +589,43 @@ class GraphKernel(object):
 
         y = y[perm]
 
-        test_idx = [(N//k)*ix for ix in range(k)] + [N]
+        test_idx = [(N // k) * ix for ix in range(k)] + [N]
         for ix in range(k):
-            test_range = list(range(test_idx[ix], test_idx[ix+1]))
-            K_test = K[np.ix_(test_range, test_range)]
-            y_test = y[test_range]
+            test_range = list(range(test_idx[ix], test_idx[ix + 1]))
 
             train_val_range = [ix for ix in range(N) if ix not in test_range]
             K_train_val = K[np.ix_(train_val_range, train_val_range)]
             y_train_val = y[train_val_range]
 
-            val_range = random.sample(train_val_range, N//k)
+            K_test = K[np.ix_(test_range, train_val_range)]
+            y_test = y[test_range]
+
+            val_range = random.sample(train_val_range, N // k)
             train_range = [ix for ix in train_val_range if ix not in val_range]
             K_train = K[np.ix_(train_range, train_range)]
             y_train = y[train_range]
 
-            K_val = K[np.ix_(val_range, val_range)]
+            K_val = K[np.ix_(val_range, train_range)]
             y_val = y[val_range]
             yield K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val
 
-    def split_embeddings(self, y, alpha = .8):
-        X_train_val, X_test, y_train_val, y_test = train_test_split(self.embeddings, y, test_size = 1 - alpha )
-        X_train, X_val, y_train, y_val = train_test_split(X_train_val, y_train_val, test_size = 1 - alpha)
+    def split_embeddings(self, alpha=.8):
+        M = self.M
+        y = self.y
+        X_train_val, X_test, y_train_val, y_test = train_test_split(M, y, test_size=1 - alpha)
+        X_train, X_val, y_train, y_val = train_test_split(X_train_val, y_train_val, test_size=1 - alpha)
         return X_train, X_val, X_test, y_train, y_val, y_test, X_train_val, y_train_val
 
-    def run_SVM(self, y, alpha = .8, features = 'kernels'):
-        # Split the data on Train, Validation, and Test data
-        if features == 'kernels':
-            K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val = self.split(y, alpha)
-        elif features == 'embeddings':
-            K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val = self.split_embeddings(y, alpha)
-        else:
-            raise ValueError('Possible values of features: kernels, embeddings')
+    def run_SVM(self,
+                K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val):
+        '''Run SVM on feature matrix (kernel or embeddings) using train-test split.'''
+        M, y = self.M, self.y
 
         C_grid = [0.001, 0.01, 0.1, 1, 10]
         val_scores = []
         for i in range(len(C_grid)):
             # Train a model on Train data
-            if features == 'kernels':
-                model = svm.SVC(kernel='precomputed', C=C_grid[i])
-            elif features == 'embeddings':
-                model = svm.SVC(C=C_grid[i])
-            else:
-                raise ValueError('Possible values of features: kernels, embeddings')
+            model = svm.SVC(kernel='precomputed', C=C_grid[i])
             model.fit(K_train, y_train)
 
             # Predict a model on Validation data
@@ -578,18 +634,25 @@ class GraphKernel(object):
 
         # re-train a model on Train + Validation data
         max_idx = np.argmax(val_scores)
-        if features == 'kernels':
-            model = svm.SVC(kernel = 'precomputed', C = C_grid[max_idx])
-        elif features == 'embeddings':
-            model = svm.SVC(C=C_grid[max_idx])
-        else:
-            raise ValueError('Possible values of features: kernels, embeddings')
+        model = svm.SVC(kernel='precomputed', C=C_grid[max_idx])
         model.fit(K_train_val, y_train_val)
 
         # Predict the final model on Test data
         y_test_pred = model.predict(K_test)
-        print(y_test_pred)
+        if self.verbose:
+            print(y_test_pred)
         return val_scores[max_idx], accuracy_score(y_test, y_test_pred), C_grid[max_idx]
+
+    def evaluate(self, k=10):
+        gen = self.kfold(k=k)
+
+        accs = []
+        for ix, (K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val) in enumerate(gen):
+            val, acc, c_max = self.run_SVM(K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val)
+            accs.append(acc)
+            if self.verbose:
+                print("Scored {} on validation and {} on test with C = {}".format(val, acc, c_max))
+        return accs
 
 
 if __name__ == '__main__':
@@ -638,20 +701,6 @@ if __name__ == '__main__':
     EPSILON = args.epsilon
     C = args.C
     D = args.D
-
-
-    ###### tests
-    gk = GraphKernel()
-    N = 10
-    A = np.reshape(range(N**2), (N, N))
-    y = np.reshape(range(N), (N, 1))
-    gk.K = A
-    gen = gk.kfold(y, k = 4)
-    for i, res in enumerate(gen):
-        print(i, res[0].shape)
-
-    exit(0)
-    ######
 
 
     # create a folder for each dataset with output results

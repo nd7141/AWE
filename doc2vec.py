@@ -22,12 +22,13 @@ import argparse
 import sys
 import time
 import threading
+import multiprocessing
 
 import numpy as np
 import tensorflow as tf
 from sklearn.base import BaseEstimator, TransformerMixin
 
-from main import Graph2Vec, GraphKernel
+from main import Graph2Vec, GraphKernel, Evaluation
 
 SEED = 2018
 
@@ -48,8 +49,8 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
                  ext = 'graphml',
                  steps = 6,
                  epochs = 1,
-                 samples = None,
-                 concurrent_steps = 8):
+                 samples = 1,
+                 concurrent_steps = 2):
 
         # bind params to class
         self.batch_size = batch_size
@@ -185,7 +186,7 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
 
     def _train_thread_body(self):
         while True:
-            batch_data, batch_labels = self.g2v.generate_batch_pvdm(batch_size=self.batch_size,
+            batch_data, batch_labels = self.g2v.generate_random_batch(batch_size=self.batch_size,
                                                                     window_size=self.window_size,
                                                                     steps=self.steps, walk_ids=self.walk_ids,
                                                                     doc_id=self.doc_id)
@@ -194,7 +195,7 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
             self.sample += 1
             self.global_step += 1
 
-            print('Thread: {}, Doc-id: {}, Samples: {}/{}'.format(threading.currentThread().getName(), self.doc_id, self.sample, self.samples))
+            # print('Thread: {}, Doc-id: {}, Samples: {}/{}'.format(threading.currentThread().getName(), self.doc_id, self.sample, self.samples))
 
             self.average_loss += l
             if self.global_step % 100 == 0:
@@ -217,6 +218,7 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
         for _ in range(self.epochs):
             print('Epoch: {}'.format(_))
             for doc_id, graph_fn in enumerate(self.sorted_graphs):
+                time2graph = time.time()
                 self.sample = 0
                 self.doc_id = doc_id
                 self.g2v.read_graphml(self.folder + graph_fn)
@@ -225,14 +227,21 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
                 print('Graph {}: {} nodes'.format(doc_id, len(self.g2v.rw_graph)))
                 if self.flag2samples == True: # take sample of N words per each graph with N nodes
                     self.samples = len(self.g2v.rw_graph)
-                workers = []
-                for _ in range(self.concurrent_steps):
-                    t = threading.Thread(target=self._train_thread_body)
-                    workers.append(t)
-                    t.start()
 
-                for t in workers:
-                    t.join()
+                self._train_thread_body()
+
+                if doc_id % 10 == 0:
+                    print('Time: {}'.format(time.time() - time2graph))
+
+                # workers = []
+                # for _ in range(self.concurrent_steps):
+                #     # t = threading.Thread(target=self._train_thread_body)
+                #     p = multiprocessing.Process(target=self._train_thread_body)
+                #     workers.append(p)
+                #     p.start()
+                #
+                # for p in workers:
+                #     p.join()
 
         self.doc_embeddings = session.run(self.normalized_doc_embeddings)
 
@@ -332,8 +341,8 @@ if __name__ == '__main__':
 
     dataset = 'imdb_b'
 
-    batch_size = 128
-    window_size = 8
+    batch_size = 10
+    window_size = 4
     embedding_size_w = 128
     embedding_size_d = 128
     n_neg_samples = 64
@@ -342,12 +351,12 @@ if __name__ == '__main__':
     loss_type = 'sampled_softmax_loss'
     optimize = 'Adagrad'
     learning_rate = 1.0
-    root = '../'
+    root = '../Datasets/'
     ext = 'graphml'
     steps = 7
     epochs = 1
-    samples = 100
-    concurrent_steps = 8
+    samples = 10
+    concurrent_steps = 2
 
     KERNEL = 'rbf'
     RESULTS_FOLDER = 'doc2vec_results/'
@@ -369,11 +378,13 @@ if __name__ == '__main__':
     parser.add_argument('--learning_rate', default=learning_rate, help='Learning rate of optimizer')
     parser.add_argument('--root', default=root, help='Root folder of dataset')
     parser.add_argument('--ext', default=ext, help='Extension of graph filenames')
+    parser.add_argument('--results_folder', default=RESULTS_FOLDER, help='Folder to store results')
 
     parser.add_argument('--steps', default=steps, help='Number of steps for AW', type=int)
     parser.add_argument('--epochs', default=epochs, help='Number of epochs to train', type=int)
     parser.add_argument('--samples', default=samples, help='Number of samples for each graph', type=int)
     parser.add_argument('--concurrent', default=concurrent_steps, help='Number of threads', type=int)
+
 
     args = parser.parse_args()
 
@@ -395,6 +406,18 @@ if __name__ == '__main__':
     epochs = args.epochs
     samples = args.samples
     concurrent_steps = args.concurrent
+    RESULTS_FOLDER = args.results_folder
+
+    if not os.path.exists(RESULTS_FOLDER):
+        os.makedirs(RESULTS_FOLDER)
+
+    if not os.path.exists(RESULTS_FOLDER + '/' + dataset):
+        os.makedirs(RESULTS_FOLDER + '/' + dataset)
+
+    print('DATASET: {}'.format(dataset))
+    print('BATCH SIZE: {}'.format(batch_size))
+    print('WORD SIZE: {}'.format(embedding_size_w))
+    print('DOCUMENT SIZE: {}'.format(embedding_size_w))
 
     # initialize model
     d2v = Doc2Vec(dataset = dataset, batch_size = batch_size, window_size = window_size,
@@ -402,31 +425,40 @@ if __name__ == '__main__':
                   n_neg_samples = n_neg_samples, concat = concat, loss_type = loss_type,
                   optimize = optimize, learning_rate = learning_rate, root = root,
                   ext = ext, steps = steps, epochs = epochs, samples = samples, concurrent_steps=concurrent_steps)
+    print()
     start2emb = time.time()
     d2v.train() # get embeddings
     finish2emb = time.time()
+    print()
     print('Time to compute embeddings: {:.2f} sec'.format(finish2emb - start2emb))
+    # E = np.load(RESULTS_FOLDER + '/' + dataset + '/embeddings.txt.npz')['E']
+
+    gk = GraphKernel()
+    gk.embeddings = d2v.doc_embeddings
+    # gk.embeddings = E
+    gk.write_embeddings(RESULTS_FOLDER + '/' + dataset + '/embeddings.txt')
 
     # read labels for each graph
     with open(d2v.folder + '/labels.txt') as f:
         y = np.array(list(map(int, f.readlines())))
 
-    gk = GraphKernel()
-    gk.embeddings = d2v.doc_embeddings
-    gk.write_embeddings('tmp.txt')
 
     ################## Estimate results: Classification Accuracy ########################
-    if KERNEL == 'rbf':
-        sigma_grid = [0.0001, 0.001, 0.01, 0.1, 1, 10, 20]
-    else:
-        sigma_grid = [1]
+    print()
+    for KERNEL in ['rbf', 'dot', 'poly']:
 
-    try:
+        if KERNEL == 'rbf':
+            sigma_grid = [0.0001, 0.001, 0.01, 0.1] + range(1, 21)
+        else:
+            sigma_grid = [1]
+
+        # try:
         # cross-validation on sigma
         for s_ix in range(len(sigma_grid)):
             print('Setup: ',dataset, KERNEL, sigma_grid[s_ix])
             sys.stdout.flush()
 
+            print('Computing Kernel Matrix...')
             start2kernelmatrix = time.time()
             gk.kernel_matrix(kernel_method=KERNEL, build_embeddings=False)
             finish2kernelmatrix = time.time()
@@ -434,35 +466,49 @@ if __name__ == '__main__':
             sys.stdout.flush()
 
             # write kernel matrix and embeddings
-            gk.write_kernel_matrix('{}/{}/kernel_{}.txt'.format(RESULTS_FOLDER, dataset, KERNEL, sigma_grid[s_ix]))
+            gk.write_kernel_matrix('{}/{}/kernel_{}_{}.txt'.format(RESULTS_FOLDER, dataset, KERNEL, sigma_grid[s_ix]))
+            # dump = np.load('{}/{}/kernel_{}_{}.txt.npz'.format(RESULTS_FOLDER, dataset, KERNEL, sigma_grid[s_ix]))
+            # gk.K = dump['K']
 
             N, M = gk.K.shape
             print('Kernel matrix shape: {}x{}'.format(N, M))
             sys.stdout.flush()
 
-            # run SVM with cross-validation on C
-            optimal_val_scores = []
+            print('Evaluating Kernel Matrix on SVM...')
+            # run k-fold SVM with cross-validation on C
+            ev = Evaluation(gk.K, y, verbose=False)
             optimal_test_scores = []
             for _ in range(TRIALS):
-                start2SVM = time.time()
-                val, test, C = gk.run_SVM(y, alpha=.9, features='kernels')
-                finish2SVM = time.time()
-                print('{} Time to run SVM: {:.2f}'.format(_, finish2SVM - start2SVM))
-                optimal_val_scores.append(val)
-                optimal_test_scores.append(test)
-                print(val, test, C)
+                print(TRIALS - _, end=' ')
+                sys.stdout.flush()
+                accs = ev.evaluate()
+                optimal_test_scores.extend(accs)
+            print()
 
-            print('Average Performance on Validation:', np.mean(optimal_val_scores))
-            print('Average Performance on Test: {:.2f}% +-{:.2f}%'.format(np.mean(optimal_test_scores),
-                                                                          np.std(optimal_test_scores)))
+
+            # optimal_val_scores = []
+            # optimal_test_scores = []
+            # for _ in range(TRIALS):
+            #     start2SVM = time.time()
+            #     val, test, C = gk.run_SVM(y, alpha=.9, features='kernels')
+            #     finish2SVM = time.time()
+            #     print('{} Time to run SVM: {:.2f}'.format(_, finish2SVM - start2SVM))
+            #     optimal_val_scores.append(val)
+            #     optimal_test_scores.append(test)
+            #     print(val, test, C)
+            #
+            # print('Average Performance on Validation:', np.mean(optimal_val_scores))
+            print('Average Performance on Test: {:.2f}% +-{:.2f}%'.format(100*np.mean(optimal_test_scores),
+                                                                          100*np.std(optimal_test_scores)))
             sys.stdout.flush()
             # append results of dataset to the file
             with open('{}/{}/performance_{}_{}_{}.txt'.format(RESULTS_FOLDER, dataset, dataset, KERNEL, steps), 'a') as f:
                 f.write('{} {} {} {} {} {} {}\n'.format(dataset, KERNEL, steps, sigma_grid[s_ix],
                                                            np.mean(optimal_test_scores), np.std(optimal_test_scores),
                                                               finish2kernelmatrix - start2kernelmatrix))
-    except Exception as e:
-        print('ERROR FOR', dataset, KERNEL, steps)
-        raise e
+            print()
+        # except Exception as e:
+        #     print('ERROR FOR', dataset, KERNEL, steps)
+        #     raise e
 
     console = []
