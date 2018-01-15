@@ -4,8 +4,11 @@ from networkx.algorithms import bipartite
 import random, time, os
 import numpy as np
 from pprint import pprint
-from main import Graph2Vec, GraphKernel
+from main import Graph2Vec, GraphKernel, Evaluation
 from doc2vec import Doc2Vec
+from sklearn import svm
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
 
 ROOT = '../'
 ds = ['imdb_b', 'imdb_m', 'collab', 'reddit_b', 'reddit_m5K', 'reddit_m10k']
@@ -13,23 +16,32 @@ ds = ['imdb_b', 'imdb_m', 'collab', 'reddit_b', 'reddit_m5K', 'reddit_m10k']
 folder = ROOT + ds[0] + '/'
 
 
-steps = 7
-window_size = 5
-dataset = 'reddit_m5k'
-folder = '../Datasets/'
 
-d2v = Doc2Vec(dataset = dataset, root=folder, steps=steps, window_size=window_size)
-d2v.g2v.read_graphml(d2v.folder + d2v.sorted_graphs[0])
-d2v.g2v.create_random_walk_graph()
-print('N = {}'.format(len(d2v.g2v.rw_graph)))
-s2s = time.time()
-d2v.g2v.generate_graph_batch(d2v.window_size, d2v.steps, d2v.walk_ids, 0)
-print('Time: {}'.format(time.time() - s2s))
+DATASET = 'imdb_m'
 
-s2s = time.time()
-d2v.g2v.generate_random_batch_pvdm(1593, d2v.window_size, d2v.steps, d2v.walk_ids, 0)
-print('Time: {}'.format(time.time() - s2s))
+with open(ROOT + DATASET + '/labels.txt') as f:
+    y = np.array(list(map(int, f.readlines())))
 
+E = np.load('doc2vec_results/'+ DATASET + '/embeddings.txt.npz')['E']
+# K = np.load('doc2vec_results/'+ DATASET + '/kernel_rbf_20.txt.npz')['K']
+ev = Evaluation(E, y, verbose=True)
+# accs = ev.evaluate(10)
+# print()
+
+accs = []
+for _ in range(10):
+    X_train, X_val, X_test, y_train, y_val, y_test, X_train_val, y_train_val = ev.split_embeddings(0.8)
+
+    model = svm.SVC(kernel='rbf', C=1)
+    model.fit(X_train_val, y_train_val)
+
+    # Predict the final model on Test data
+    y_test_pred = model.predict(X_test)
+    acc = accuracy_score(y_test, y_test_pred)
+    accs.append(acc)
+    print(y_test_pred)
+    print('Accuracy: {}'.format(acc))
+print('Mean Accuracy: {}'.format(np.mean(accs)))
 
 
 
