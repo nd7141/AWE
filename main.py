@@ -710,7 +710,7 @@ if __name__ == '__main__':
 
     # read labels for each graph
     with open(DATASET + '/labels.txt') as f:
-        y = np.array(map(int, f.readlines()))
+        y = np.array(list(map(int, f.readlines())))
 
     # create an instance of a graph kernel and read all graphs
     gk = GraphKernel()
