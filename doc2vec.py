@@ -416,8 +416,14 @@ if __name__ == '__main__':
 
     print('DATASET: {}'.format(dataset))
     print('BATCH SIZE: {}'.format(batch_size))
-    print('WORD SIZE: {}'.format(embedding_size_w))
-    print('DOCUMENT SIZE: {}'.format(embedding_size_w))
+    print('SAMPLES: {}'.format(samples))
+    print('WINDOW SIZE: {}'.format(window_size))
+    print('')
+    print('EMBEDDING WORD SIZE: {}'.format(embedding_size_w))
+    print('EMBEDDING DOCUMENT SIZE: {}'.format(embedding_size_w))
+    print('STEPS: {}'.format(steps))
+    print('')
+
 
     # initialize model
     d2v = Doc2Vec(dataset = dataset, batch_size = batch_size, window_size = window_size,
@@ -448,7 +454,7 @@ if __name__ == '__main__':
     for KERNEL in ['rbf', 'dot', 'poly']:
 
         if KERNEL == 'rbf':
-            sigma_grid = [0.0001, 0.001, 0.01, 0.1] + range(1, 21)
+            sigma_grid = [0.0001, 0.001, 0.01, 0.1] + [1, 5, 10, 15, 20]
         else:
             sigma_grid = [1]
 
