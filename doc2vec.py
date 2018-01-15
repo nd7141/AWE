@@ -381,7 +381,7 @@ if __name__ == '__main__':
 
             print('Computing Kernel Matrix...')
             start2kernelmatrix = time.time()
-            gk.kernel_matrix(kernel_method=KERNEL, build_embeddings=False)
+            gk.kernel_matrix(kernel_method=KERNEL, build_embeddings=False, sigma=sigma_grid[s_ix])
             finish2kernelmatrix = time.time()
             print('Time to compute Kernel Matrix: ', finish2kernelmatrix - start2kernelmatrix)
             sys.stdout.flush()
