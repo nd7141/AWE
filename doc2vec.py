@@ -13,6 +13,7 @@ http://arxiv.org/abs/1405.4053
 '''
 from __future__ import absolute_import
 from __future__ import print_function
+from __future__ import division
 
 import os
 import math
@@ -256,8 +257,8 @@ if __name__ == '__main__':
 
     dataset = 'imdb_b'
 
-    batch_size = 10
-    window_size = 4
+    batch_size = 100
+    window_size = 16
     embedding_size_w = 128
     embedding_size_d = 128
     n_neg_samples = 64
@@ -270,7 +271,7 @@ if __name__ == '__main__':
     ext = 'graphml'
     steps = 7
     epochs = 1
-    samples = 10
+    samples = 100
     concurrent_steps = 2
 
     KERNEL = 'rbf'

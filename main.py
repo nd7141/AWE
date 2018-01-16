@@ -1,5 +1,7 @@
 #!/opt/conda/bin/python
 
+from __future__ import division
+
 import networkx as nx
 import random, time, math, os, sys
 import numpy as np
