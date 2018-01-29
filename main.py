@@ -86,7 +86,7 @@ class Graph2Vec(object):
             last_step_paths = current_step_paths
         # filter only on n-steps walks
         if keep_last:
-            paths = filter(lambda path: len(path) ==  steps + 1, paths)
+            paths = list(filter(lambda path: len(path) ==  steps + 1, paths))
         self.paths[steps] = paths
 
     def _all_paths_edges(self, steps):
@@ -194,7 +194,7 @@ class Graph2Vec(object):
         return tuple(pattern)
 
     def n_samples(self, steps, delta, eps):
-        a = len(self.paths[steps])
+        a = len(list(self.paths[steps]))
         estimation = 2*(math.log(2)*a + math.log(1./delta))/eps**2
         return int(estimation) + 1
 
