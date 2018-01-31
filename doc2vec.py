@@ -43,7 +43,7 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
                  embedding_size_w=64,
                  embedding_size_d=64,
                  loss_type='sampled_softmax_loss',
-                 n_neg_samples=64,
+                 num_samples=64,
                  optimize='Adagrad',
                  learning_rate=1.0,
                  root = '../',
@@ -60,7 +60,7 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
         self.embedding_size_w = embedding_size_w
         self.embedding_size_d = embedding_size_d
         self.loss_type = loss_type
-        self.n_neg_samples = n_neg_samples
+        self.num_samples = num_samples
         self.optimize = optimize
         self.learning_rate = learning_rate
 
@@ -161,19 +161,24 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
             sampled_values = tf.nn.uniform_candidate_sampler(
                 true_classes=tf.to_int64(self.train_labels),
                 num_true=1,
-                num_sampled=self.n_neg_samples,
+                # num_sampled=self.num_samples,
+                num_sampled=self.vocabulary_size,
                 unique=True,
                 range_max=self.vocabulary_size)
 
             # Compute the loss, using a sample of the negative labels each time.
-            if self.loss_type == 'sampled_softmax_loss':
+            if self.loss_type == 'sampled_softmax':
                 loss = tf.nn.sampled_softmax_loss(self.weights, self.biases, self.train_labels,
-                                                  self.embed, self.n_neg_samples, self.vocabulary_size,
+                                                  self.embed,
+                                                  # self.num_samples,
+                                                  self.vocabulary_size,
+                                                  self.vocabulary_size,
                                                   sampled_values = sampled_values)
-            elif self.loss_type == 'nce_loss':
+            elif self.loss_type == 'nce':
                 loss = tf.nn.nce_loss(self.weights, self.biases, self.train_labels,
-                                     self.embed, self.n_neg_samples, self.vocabulary_size,
+                                     self.embed, self.num_samples, self.vocabulary_size,
                                      sampled_values=sampled_values)
+
             self.loss = tf.reduce_mean(loss)
 
             # Optimizer.
@@ -271,10 +276,10 @@ if __name__ == '__main__':
     window_size = 16
     embedding_size_w = 128
     embedding_size_d = 128
-    n_neg_samples = 64
+    num_samples = 64
 
     concat = False
-    loss_type = 'sampled_softmax_loss'
+    loss_type = 'sampled_softmax'
     optimize = 'Adagrad'
     learning_rate = 1.0
     root = '../'
@@ -296,10 +301,10 @@ if __name__ == '__main__':
     parser.add_argument('--window_size', default=window_size, help='Number of context words for target', type=int)
     parser.add_argument('--embedding_size_w', default=embedding_size_w, help='Dimension of word embeddings', type=int)
     parser.add_argument('--embedding_size_d', default=embedding_size_d, help='Dimension of document embeddings', type=int)
-    parser.add_argument('--n_neg_samples', default=n_neg_samples, help='Number of negative samples', type=int)
+    parser.add_argument('--num_samples', default=num_samples, help='Number of (negative) samples for objective functions', type=int)
 
     parser.add_argument('--concat', default=concat, help='Concatenate or Average context words', type=bool)
-    parser.add_argument('--loss_type', default=loss_type, help='sampled_softmax_loss or nce_loss')
+    parser.add_argument('--loss_type', default=loss_type, help='sampled_softmax or nce')
     parser.add_argument('--optimize', default=optimize, help='Adagrad or SGD')
     parser.add_argument('--learning_rate', default=learning_rate, help='Learning rate of optimizer')
     parser.add_argument('--root', default=root, help='Root folder of dataset')
@@ -320,7 +325,7 @@ if __name__ == '__main__':
     window_size = args.window_size
     embedding_size_w = args.embedding_size_w
     embedding_size_d = args.embedding_size_d
-    n_neg_samples = args.n_neg_samples
+    num_samples = args.num_samples
 
     concat = args.concat
     loss_type = args.loss_type
@@ -354,7 +359,7 @@ if __name__ == '__main__':
     # initialize model
     d2v = Doc2Vec(dataset = dataset, batch_size = batch_size, window_size = window_size,
                   embedding_size_w = embedding_size_w, embedding_size_d = embedding_size_d,
-                  n_neg_samples = n_neg_samples, concat = concat, loss_type = loss_type,
+                  num_samples = num_samples, concat = concat, loss_type = loss_type,
                   optimize = optimize, learning_rate = learning_rate, root = root,
                   ext = ext, steps = steps, epochs = epochs, samples = samples, concurrent_steps=concurrent_steps)
     print()
