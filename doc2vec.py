@@ -157,13 +157,23 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
             # concat word and doc vectors
             self.embed = tf.concat(embed, 1)
 
+            # sampling using uniform distribution
+            sampled_values = tf.nn.uniform_candidate_sampler(
+                true_classes=tf.to_int64(self.train_labels),
+                num_true=1,
+                num_sampled=self.n_neg_samples,
+                unique=True,
+                range_max=self.vocabulary_size)
+
             # Compute the loss, using a sample of the negative labels each time.
             if self.loss_type == 'sampled_softmax_loss':
                 loss = tf.nn.sampled_softmax_loss(self.weights, self.biases, self.train_labels,
-                                                  self.embed, self.n_neg_samples, self.vocabulary_size)
+                                                  self.embed, self.n_neg_samples, self.vocabulary_size,
+                                                  sampled_values = sampled_values)
             elif self.loss_type == 'nce_loss':
-                loss= tf.nn.nce_loss(self.weights, self.biases, self.train_labels,
-                                     self.embed, self.n_neg_samples, self.vocabulary_size)
+                loss = tf.nn.nce_loss(self.weights, self.biases, self.train_labels,
+                                     self.embed, self.n_neg_samples, self.vocabulary_size,
+                                     sampled_values=sampled_values)
             self.loss = tf.reduce_mean(loss)
 
             # Optimizer.
@@ -267,7 +277,7 @@ if __name__ == '__main__':
     loss_type = 'sampled_softmax_loss'
     optimize = 'Adagrad'
     learning_rate = 1.0
-    root = '../Datasets/'
+    root = '../'
     ext = 'graphml'
     steps = 7
     epochs = 1
@@ -275,7 +285,7 @@ if __name__ == '__main__':
     concurrent_steps = 2
 
     KERNEL = 'rbf'
-    RESULTS_FOLDER = 'doc2vec_results/'
+    RESULTS_FOLDER = 'doc2vec_results2/'
     TRIALS = 10  # number of cross-validation
 
     parser = argparse.ArgumentParser(description='Getting classification accuracy for Graph Kernel Methods')
