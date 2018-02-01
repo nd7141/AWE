@@ -51,7 +51,8 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
                  steps = 6,
                  epochs = 1,
                  samples = 1,
-                 concurrent_steps = 2):
+                 concurrent_steps = 2,
+                 candidate_func = None):
 
         # bind params to class
         self.batch_size = batch_size
@@ -63,6 +64,7 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
         self.num_samples = num_samples
         self.optimize = optimize
         self.learning_rate = learning_rate
+        self.candidate_func = candidate_func
 
         self.ROOT = root
         self.ext = ext
@@ -157,14 +159,16 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
             # concat word and doc vectors
             self.embed = tf.concat(embed, 1)
 
-            # sampling using uniform distribution
-            sampled_values = tf.nn.uniform_candidate_sampler(
-                true_classes=tf.to_int64(self.train_labels),
-                num_true=1,
-                # num_sampled=self.num_samples,
-                num_sampled=self.vocabulary_size,
-                unique=True,
-                range_max=self.vocabulary_size)
+            # choosing negative sampling function
+            sampled_values = None # log uniform by default
+            if self.candidate_func == 'uniform': # change to uniform
+                sampled_values = tf.nn.uniform_candidate_sampler(
+                    true_classes=tf.to_int64(self.train_labels),
+                    num_true=1,
+                    # num_sampled=self.num_samples,
+                    num_sampled=self.vocabulary_size,
+                    unique=True,
+                    range_max=self.vocabulary_size)
 
             # Compute the loss, using a sample of the negative labels each time.
             if self.loss_type == 'sampled_softmax':
@@ -288,6 +292,7 @@ if __name__ == '__main__':
     epochs = 1
     samples = 100
     concurrent_steps = 2
+    candidate_func = None
 
     KERNEL = 'rbf'
     RESULTS_FOLDER = 'doc2vec_results2/'
@@ -315,6 +320,7 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', default=epochs, help='Number of epochs to train', type=int)
     parser.add_argument('--samples', default=samples, help='Number of samples for each graph', type=int)
     parser.add_argument('--concurrent', default=concurrent_steps, help='Number of threads', type=int)
+    parser.add_argument('--candidate_func', default=candidate_func, help='Sampling function for negatives: uniform or loguniform (None, by default)')
 
 
     args = parser.parse_args()
@@ -338,6 +344,7 @@ if __name__ == '__main__':
     samples = args.samples
     concurrent_steps = args.concurrent
     RESULTS_FOLDER = args.results_folder
+    candidate_func = args.candidate_func
 
     if not os.path.exists(RESULTS_FOLDER):
         os.makedirs(RESULTS_FOLDER)
@@ -361,7 +368,8 @@ if __name__ == '__main__':
                   embedding_size_w = embedding_size_w, embedding_size_d = embedding_size_d,
                   num_samples = num_samples, concat = concat, loss_type = loss_type,
                   optimize = optimize, learning_rate = learning_rate, root = root,
-                  ext = ext, steps = steps, epochs = epochs, samples = samples, concurrent_steps=concurrent_steps)
+                  ext = ext, steps = steps, epochs = epochs, samples = samples, concurrent_steps=concurrent_steps,
+                  candidate_func = candidate_func)
     print()
     start2emb = time.time()
     d2v.train() # get embeddings
@@ -403,7 +411,7 @@ if __name__ == '__main__':
             sys.stdout.flush()
 
             # write kernel matrix and embeddings
-            gk.write_kernel_matrix('{}/{}/kernel_{}_{}.txt'.format(RESULTS_FOLDER, dataset, KERNEL, sigma_grid[s_ix]))
+            # gk.write_kernel_matrix('{}/{}/kernel_{}_{}.txt'.format(RESULTS_FOLDER, dataset, KERNEL, sigma_grid[s_ix]))
             # dump = np.load('{}/{}/kernel_{}_{}.txt.npz'.format(RESULTS_FOLDER, dataset, KERNEL, sigma_grid[s_ix]))
             # gk.K = dump['K']
 
