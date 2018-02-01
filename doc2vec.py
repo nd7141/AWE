@@ -165,8 +165,7 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
                 sampled_values = tf.nn.uniform_candidate_sampler(
                     true_classes=tf.to_int64(self.train_labels),
                     num_true=1,
-                    # num_sampled=self.num_samples,
-                    num_sampled=self.vocabulary_size,
+                    num_sampled=self.num_samples,
                     unique=True,
                     range_max=self.vocabulary_size)
 
@@ -174,8 +173,7 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
             if self.loss_type == 'sampled_softmax':
                 loss = tf.nn.sampled_softmax_loss(self.weights, self.biases, self.train_labels,
                                                   self.embed,
-                                                  # self.num_samples,
-                                                  self.vocabulary_size,
+                                                  self.num_samples,
                                                   self.vocabulary_size,
                                                   sampled_values = sampled_values)
             elif self.loss_type == 'nce':
