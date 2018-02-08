@@ -106,7 +106,7 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
         self.walk_ids = dict()
         for i, path in enumerate(self.g2v.paths[self.steps]):
             self.walk_ids[tuple(path)] = i
-            
+
         self.vocabulary_size = max(self.walk_ids.values()) + 1
         print('Number of words: {}'.format(self.vocabulary_size))
 
@@ -304,7 +304,7 @@ if __name__ == '__main__':
     samples = 100
     concurrent_steps = 2
     candidate_func = None
-    graph_labels = 'nodes'
+    graph_labels = None
 
     KERNEL = 'rbf'
     RESULTS_FOLDER = 'doc2vec_results2/'
