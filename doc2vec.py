@@ -383,7 +383,7 @@ if __name__ == '__main__':
 
     # read labels for each graph
     y = []
-    with open('../reddit_m5k/labels.txt') as f:
+    with open(d2v.folder + '/labels.txt') as f:
         for line in f:
             y.extend(list(map(int, line.strip().split())))
     y = np.array(y)
