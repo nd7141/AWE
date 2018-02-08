@@ -553,7 +553,7 @@ class Evaluation(object):
         M = self.M
         y = self.y
         K = np.copy(M)
-        N, M = K.shape
+        N = K.shape[0]
 
         perm = np.random.permutation(N)
         for i in range(N):
@@ -581,7 +581,7 @@ class Evaluation(object):
         M = self.M
         y = self.y
         K = np.copy(M)
-        N, M = K.shape
+        N = K.shape[0]
 
         perm = np.random.permutation(N)
         for i in range(N):
@@ -598,6 +598,7 @@ class Evaluation(object):
             train_val_range = [ix for ix in range(N) if ix not in test_range]
             K_train_val = K[np.ix_(train_val_range, train_val_range)]
             y_train_val = y[train_val_range]
+
 
             K_test = K[np.ix_(test_range, train_val_range)]
             y_test = y[test_range]
