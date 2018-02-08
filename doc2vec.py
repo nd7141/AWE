@@ -42,7 +42,7 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
                  concat=False,
                  embedding_size_w=64,
                  embedding_size_d=64,
-                 loss_type='sampled_softmax_loss',
+                 loss_type='sampled_softmax',
                  num_samples=64,
                  optimize='Adagrad',
                  learning_rate=1.0,
@@ -382,8 +382,11 @@ if __name__ == '__main__':
     gk.write_embeddings(RESULTS_FOLDER + '/' + dataset + '/embeddings.txt')
 
     # read labels for each graph
-    with open(d2v.folder + '/labels.txt') as f:
-        y = np.array(list(map(int, f.readlines())))
+    y = []
+    with open('../reddit_m5k/labels.txt') as f:
+        for line in f:
+            y.extend(list(map(int, line.strip().split())))
+    y = np.array(y)
 
 
     ################## Estimate results: Classification Accuracy ########################
@@ -391,7 +394,7 @@ if __name__ == '__main__':
     for KERNEL in ['rbf', 'dot', 'poly']:
 
         if KERNEL == 'rbf':
-            sigma_grid = [0.0001, 0.001, 0.01, 0.1] + [1, 5, 10, 15, 20]
+            sigma_grid = [1]
         else:
             sigma_grid = [1]
 
