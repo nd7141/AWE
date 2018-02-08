@@ -49,11 +49,12 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
                  learning_rate=1.0,
                  root = '../',
                  ext = 'graphml',
-                 steps = 6,
+                 steps = 7,
                  epochs = 1,
                  samples = 1,
                  concurrent_steps = 2,
-                 candidate_func = None):
+                 candidate_func = None,
+                 graph_labels = None):
 
         # bind params to class
         self.batch_size = batch_size
@@ -66,6 +67,7 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
         self.optimize = optimize
         self.learning_rate = learning_rate
         self.candidate_func = candidate_func
+        self.graph_labels = graph_labels
 
         self.ROOT = root
         self.ext = ext
@@ -92,10 +94,19 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
 
         # get all AW (vocabulary size)
         self.g2v = Graph2Vec()
-        self.g2v._all_paths(self.steps, keep_last=True)
+        if self.graph_labels is None:
+            self.g2v._all_paths(self.steps, keep_last=True)
+        elif self.graph_labels == 'nodes':
+            self.g2v._all_paths_nodes(self.steps, keep_last=True)
+        elif self.graph_labels == 'edges':
+            self.g2v._all_paths_edges(self.steps, keep_last=True)
+        elif self.graph_labels == 'edges_nodes':
+            self.g2v._all_paths_edges_nodes(self.steps, keep_last=True)
+
         self.walk_ids = dict()
         for i, path in enumerate(self.g2v.paths[self.steps]):
             self.walk_ids[tuple(path)] = i
+
         self.vocabulary_size = max(self.walk_ids.values()) + 1
         print('Number of words: {}'.format(self.vocabulary_size))
 
@@ -208,7 +219,8 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
             batch_data, batch_labels = self.g2v.generate_random_batch(batch_size=self.batch_size,
                                                                     window_size=self.window_size,
                                                                     steps=self.steps, walk_ids=self.walk_ids,
-                                                                    doc_id=self.doc_id)
+                                                                    doc_id=self.doc_id,
+                                                                    graph_labels = self.graph_labels)
             feed_dict = {self.train_dataset: batch_data, self.train_labels: batch_labels}
             op, l = self.sess.run([self.optimizer, self.loss], feed_dict=feed_dict)
             self.sample += 1
@@ -273,7 +285,7 @@ if __name__ == '__main__':
     random.seed(SEED)
     np.random.seed(SEED)
 
-    dataset = 'imdb_b'
+    dataset = 'DD'
 
     batch_size = 100
     window_size = 16
@@ -285,13 +297,14 @@ if __name__ == '__main__':
     loss_type = 'sampled_softmax'
     optimize = 'Adagrad'
     learning_rate = 1.0
-    root = '../'
+    root = '../bio/'
     ext = 'graphml'
     steps = 7
     epochs = 1
     samples = 100
     concurrent_steps = 2
     candidate_func = None
+    graph_labels = None
 
     KERNEL = 'rbf'
     RESULTS_FOLDER = 'doc2vec_results2/'
@@ -320,6 +333,9 @@ if __name__ == '__main__':
     parser.add_argument('--samples', default=samples, help='Number of samples for each graph', type=int)
     parser.add_argument('--concurrent', default=concurrent_steps, help='Number of threads', type=int)
     parser.add_argument('--candidate_func', default=candidate_func, help='Sampling function for negatives: uniform or loguniform (None, by default)')
+    parser.add_argument('--graph_labels', default=graph_labels,
+                        help='Graph labels to use (none, nodes, edges, edges_nodes)')
+
 
 
     args = parser.parse_args()
@@ -344,6 +360,7 @@ if __name__ == '__main__':
     concurrent_steps = args.concurrent
     RESULTS_FOLDER = args.results_folder
     candidate_func = args.candidate_func
+    graph_labels = args.graph_labels
 
     if not os.path.exists(RESULTS_FOLDER):
         os.makedirs(RESULTS_FOLDER)
@@ -368,7 +385,7 @@ if __name__ == '__main__':
                   num_samples = num_samples, concat = concat, loss_type = loss_type,
                   optimize = optimize, learning_rate = learning_rate, root = root,
                   ext = ext, steps = steps, epochs = epochs, samples = samples, concurrent_steps=concurrent_steps,
-                  candidate_func = candidate_func)
+                  candidate_func = candidate_func, graph_labels=graph_labels)
     print()
     start2emb = time.time()
     d2v.train() # get embeddings

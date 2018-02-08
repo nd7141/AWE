@@ -72,7 +72,7 @@ class Graph2Vec(object):
                     RW.add_edge(node, v, {'weight': edges[v].get(label_name,1) / total})
         self.rw_graph = RW
 
-    def _all_paths(self, steps, keep_last = False):
+    def _all_paths(self, steps, keep_last = True):
         '''Get all possible meta-paths of length up to steps.'''
         paths = []
         last_step_paths = [[0, 1]]
@@ -89,7 +89,7 @@ class Graph2Vec(object):
             paths = list(filter(lambda path: len(path) ==  steps + 1, paths))
         self.paths[steps] = paths
 
-    def _all_paths_edges(self, steps):
+    def _all_paths_edges(self, steps, keep_last = True):
         '''Get all possible meta-paths of length up to steps, using edge labels'''
         paths = []
         last_step_paths = [[]]
@@ -101,10 +101,12 @@ class Graph2Vec(object):
                         paths.append(walks + [j])
                         current_step_paths.append(walks + [j])
             last_step_paths = current_step_paths
+        if keep_last:
+            paths = last_step_paths
         self.paths[steps] = paths
         return paths
 
-    def _all_paths_nodes(self, steps):
+    def _all_paths_nodes(self, steps, keep_last = True):
         '''Get all possible meta-paths of length up to steps, using node labels'''
         paths = []
         last_step_paths = [[0]]
@@ -116,13 +118,15 @@ class Graph2Vec(object):
                         paths.append(walks + [j])
                         current_step_paths.append(walks + [j])
             last_step_paths = current_step_paths
+        if keep_last:
+            paths = last_step_paths
         self.paths[steps] = paths
         return paths
 
-    def _all_paths_edges_nodes(self, steps):
+    def _all_paths_edges_nodes(self, steps, keep_last = True):
         '''Get all possible meta-paths of length up to steps, using edge-node labels'''
-        edge_paths = self._all_paths_edges(steps)
-        node_paths = self._all_paths_nodes(steps)
+        edge_paths = self._all_paths_edges(steps, keep_last=keep_last)
+        node_paths = self._all_paths_nodes(steps, keep_last=keep_last)
         paths = []
         for p1 in edge_paths:
             for p2 in node_paths:
@@ -227,7 +231,70 @@ class Graph2Vec(object):
             node = v
         return tuple(walk)
 
-    def generate_random_batch(self, batch_size, window_size, steps, walk_ids, doc_id):
+    def _random_walk_with_label_nodes(self, node, steps):
+        '''Creates a random walk from a node for arbitrary steps.
+        Returns a tuple with consequent nodes.'''
+        d = dict()
+        count = 0
+        pattern = []
+        for i in range(steps + 1):
+            label = self.graph.node[node]['label']
+            if label not in d:
+                d[label] = count
+                count += 1
+            pattern.append(d[label])
+            node = self._random_step_node(node)
+        return tuple(pattern)
+
+    def _random_walk_with_label_edges(self, node, steps):
+        '''Creates a random walk from a node for arbitrary steps.
+        Returns a tuple with consequent nodes.'''
+        idx = 0
+        pattern = []
+        d = dict()
+        for i in range(steps):
+            v = self._random_step_node(node)
+            label = int(self.graph[node][v]['label'])
+            if label not in d:
+                d[label] = idx
+                idx += 1
+            pattern.append(d[label])
+        return tuple(pattern)
+
+    def _random_walk_with_label_edges_nodes(self, node, steps):
+        '''Creates a random walk from a node for arbitrary steps.
+        Returns a tuple with consequent nodes.'''
+        node_idx = 0
+        edge_idx = 0
+        pattern = [0]
+        node_labels = dict()
+        edge_labels = dict()
+        for i in range(steps):
+            v = self._random_step_node(node)
+            node_label = self.graph.node[node]['label']
+            edge_label = int(self.graph[node][v]['label'])
+            if node_label not in node_labels:
+                node_labels[node_label] = node_idx
+                node_idx += 1
+            if edge_label not in edge_labels:
+                edge_labels[edge_label] = edge_idx
+                edge_idx += 1
+            pattern.append(node_labels[node_label])
+            pattern.append(edge_labels[edge_label])
+            node = v
+        return tuple(pattern)
+
+    def _anonymous_walk(self, node, steps, labels = None):
+        if labels is None:
+            return self._random_walk_node(node, steps)
+        elif labels == 'nodes':
+            return self._random_walk_with_label_nodes(node, steps)
+        elif labels == 'edges':
+            return self._random_walk_with_label_edges(node, steps)
+        elif labels == 'edges_nodes':
+            return self._random_walk_with_label_edges_nodes(node, steps)
+
+    def generate_random_batch(self, batch_size, window_size, steps, walk_ids, doc_id, graph_labels = None):
         '''
         Generates a (random) batch and labels for doc2vec PV-DM.
         reference: https://arxiv.org/abs/1405.4053
@@ -245,6 +312,7 @@ class Graph2Vec(object):
         of length = steps are considered for context words.
         :param walk_ids: dictionary between AW and its id. AW corresponds to a possible word.
         :param doc_id: the id of the graph.
+        :param graph_labels: None (no labels), nodes, edges, nodes_edges labels to use.
         :return: batch (batch_size, window_size + 1) numpy array with batches for doc2vec
                  labels (batch_size, 1) numpy array with target words for doc2vec
         '''
@@ -264,7 +332,7 @@ class Graph2Vec(object):
         while i < batch_size:
             node = random.choice(self.rw_graph.nodes()) # choose random node
             # generate anonymous walks from this node
-            aw = [walk_ids[self._random_walk_node(node, steps)] for _ in range(window_size + 1)]
+            aw = [walk_ids[self._anonymous_walk(node, steps, graph_labels)] for _ in range(window_size + 1)]
             batch[i, :window_size] = aw[:window_size]
             labels[i, 0] = aw[window_size]
             i += 1

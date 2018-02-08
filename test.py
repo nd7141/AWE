@@ -16,11 +16,19 @@ import json
 random.seed(2018)
 np.random.seed(2018)
 
-ROOT = '../'
+ROOT = '../bio/'
 ds = ['imdb_b', 'imdb_m', 'collab', 'reddit_b', 'reddit_m5K', 'reddit_m10k']
 #
-folder = ROOT + ds[0] + '/'
 
+from shutil import copyfile
+import re
+ds = 'DD'
+folder = ROOT + ds + '/'
+
+G = nx.read_graphml(folder + '{}_1.graphml'.format(ds))
+print(ds)
+print(G.edges(data=True))
+print(G.nodes(data=True))
 
 
 DATASET = 'imdb_b'
