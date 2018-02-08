@@ -42,7 +42,7 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
                  concat=False,
                  embedding_size_w=64,
                  embedding_size_d=64,
-                 loss_type='sampled_softmax_loss',
+                 loss_type='sampled_softmax',
                  num_samples=64,
                  optimize='Adagrad',
                  learning_rate=1.0,
