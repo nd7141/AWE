@@ -22,6 +22,7 @@ import json
 import argparse
 import sys
 import time
+import re
 import threading
 import multiprocessing
 
@@ -85,7 +86,7 @@ class Doc2Vec(BaseEstimator, TransformerMixin):
         self.folder = self.ROOT + self.dataset + '/'
         folder_graphs = filter(lambda g: g.endswith(max(self.ext, '')), os.listdir(self.folder))
 
-        self.sorted_graphs = sorted(folder_graphs, key=lambda g: int(g.split('.')[0][5:]))
+        self.sorted_graphs = sorted(folder_graphs, key=lambda g: int(re.findall(r'\d+', g)[0]))
         self.document_size = len(self.sorted_graphs)
         print('Number of graphs: {}'.format(self.document_size))
 
