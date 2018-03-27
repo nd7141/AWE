@@ -46,4 +46,3 @@ docker run -i --user $(id -u):$(id -g) --mount type=bind,source=/home/sivanov/Da
 Here, `--user $(id -u):$(id -g)` makes sure your results will be written with your user permission. `--mount type=bind,source=/home/sivanov/Datasets,target=/src/Datasets` mounts your host directory with datasets into docker image under /src/Datasets directory. `--mount type=bind,source=/home/sivanov/awe/,target=/src/awe/` mounts your host directory /home/sivanov/awe/ with scripts into an image directory /src/awe/. `--name='sergey.mutag.1'` sets the name of container. `-t awe-docker:latest` provides a name of the image. 
 
 After running, you should get results in your host machine at awe/mutag_results directory. 
-
