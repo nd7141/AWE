@@ -1,4 +1,3 @@
-#!/opt/conda/bin/python
 '''
 Tensorflow implementation of distributed Anonymous Walks Embeddings (AWE).
 
@@ -8,7 +7,7 @@ Tensorflow implementation of distributed Anonymous Walks Embeddings (AWE).
 @references:
 
 '''
-from __future__ import division
+from __future__ import division, print_function
 
 import os
 import math
