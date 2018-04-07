@@ -33,7 +33,7 @@ To run the code on docker, we first need to obtain an appropriate image. After i
 docker pull gcr.io/tensorflow/tensorflow
 ```
 
-After that you need to build a Dockerfile. 
+After that you need to build a Dockerfile. You should have in the current directory Dockerfile. To avoid compression of all the files under current directory, we recommend to create a separate folder for Dockerfile and navigate there. 
 ```
 docker build -t awe-docker .
 ```
