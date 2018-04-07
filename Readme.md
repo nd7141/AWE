@@ -1,3 +1,7 @@
+# Tutorial
+
+Check a notebook `Tutorial.ipynb` to see how to get network embeddings, load/save embeddings matrix, calculate kernel matrix, and perform SVM calculation. 
+
 # Running code
 
 The following command will run `doc2vec` model with the parameters.
@@ -35,6 +39,7 @@ docker pull gcr.io/tensorflow/tensorflow
 
 After that you need to build a Dockerfile. You should have in the current directory Dockerfile. To avoid compression of all the files under current directory, we recommend to create a separate folder for Dockerfile and navigate there. 
 ```
+cd docker
 docker build -t awe-docker .
 ```
 
