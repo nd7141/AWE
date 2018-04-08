@@ -645,8 +645,8 @@ class Evaluation(object):
         self.verbose = verbose
 
     def split(self, alpha=.8):
-        y = self.y
-        K = self.K
+        y = np.copy(self.y)
+        K = np.copy(self.K)
         N = K.shape[0]
 
         perm = np.random.permutation(N)
@@ -677,8 +677,8 @@ class Evaluation(object):
         :param k: number of folds.
         :return:
         '''
-        y = self.y
-        K = self.K
+        y = np.copy(self.y)
+        K = np.copy(self.K)
         N = K.shape[0]
 
         # permute matrix first
@@ -713,8 +713,8 @@ class Evaluation(object):
 
     def split_embeddings(self, alpha=.8):
         '''Split embeddings matrix.'''
-        K = self.K
-        y = self.y
+        K = np.copy(self.K)
+        y = np.copy(self.y)
         K_train_val, K_test, y_train_val, y_test = train_test_split(K, y, test_size=1 - alpha)
         K_train, K_val, y_train, y_val = train_test_split(K_train_val, y_train_val, test_size=1 - alpha)
         return K_train, K_val, K_test, y_train, y_val, y_test, K_train_val, y_train_val
