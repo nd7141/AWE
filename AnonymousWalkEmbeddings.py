@@ -250,9 +250,13 @@ class AWE(object):
         self.average_loss = 0
         self.global_step = 0
         print('Initialized')
+        random_order = list(range(len(self.sorted_graphs)))
+        random.shuffle(random_order)
         for _ in range(self.epochs):
             print('Epoch: {}'.format(_))
-            for doc_id, graph_fn in enumerate(self.sorted_graphs):
+            for doc_id in random_order:
+            # for doc_id, graph_fn in enumerate(self.sorted_graphs):
+                graph_fn = self.sorted_graphs[doc_id]
                 time2graph = time.time()
                 self.sample = 0
                 self.doc_id = doc_id
@@ -279,24 +283,24 @@ if __name__ == '__main__':
     random.seed(SEED)
     np.random.seed(SEED)
 
-    dataset = 'mutag'
+    dataset = 'imdb_b'
 
     batch_size = 500
-    window_size = 8
+    window_size = 4
     embedding_size_w = 128
     embedding_size_d = 128
-    num_samples = 256
+    num_samples = 128
 
     concat = False
     loss_type = 'sampled_softmax'
     optimize = 'Adagrad'
     learning_rate = 1.0
-    root = '../bio/'
+    root = '../Datasets/'
     ext = 'graphml'
     steps = 7
-    epochs = 1
-    batches_per_epoch = 200
-    candidate_func = None
+    epochs = 2
+    batches_per_epoch = 100
+    candidate_func = 'uniform'
     graph_labels = None
 
     KERNEL = 'rbf'
