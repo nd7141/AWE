@@ -45,7 +45,8 @@ class AWE(object):
                  epochs = 1,
                  batches_per_epoch = 1,
                  candidate_func = None,
-                 graph_labels = None):
+                 graph_labels = None,
+                 graph_idxs = None):
         '''
         Initialize AWE model.
         :param dataset: name of the dataset and corresponding name of the folder.
@@ -99,6 +100,9 @@ class AWE(object):
         folder_graphs = filter(lambda g: g.endswith(max(self.ext, '')), os.listdir(self.folder))
 
         self.sorted_graphs = sorted(folder_graphs, key=lambda g: int(re.findall(r'\d+', g)[0]))
+        if graph_idxs is None:
+            graph_idxs = range(len(self.sorted_graphs))
+        self.sorted_graphs = np.array(self.sorted_graphs)[graph_idxs]
         self.document_size = len(self.sorted_graphs)
         print('Number of graphs: {}'.format(self.document_size))
 
@@ -298,7 +302,7 @@ if __name__ == '__main__':
     root = '../Datasets/'
     ext = 'graphml'
     steps = 7
-    epochs = 2
+    epochs = 1
     batches_per_epoch = 100
     candidate_func = 'uniform'
     graph_labels = None
@@ -373,21 +377,27 @@ if __name__ == '__main__':
     print('LENGTH: {}'.format(steps))
     print('')
 
+    folder = root + dataset + '/'
+    folder_graphs = filter(lambda g: g.endswith(max(ext, '')), os.listdir(folder))
+    N = len(list(folder_graphs))
 
     # initialize model
-    awe = AWE(dataset = dataset, batch_size = batch_size, window_size = window_size,
-                  embedding_size_w = embedding_size_w, embedding_size_d = embedding_size_d,
-                  num_samples = num_samples, concat = concat, loss_type = loss_type,
-                  optimize = optimize, learning_rate = learning_rate, root = root,
-                  ext = ext, steps = steps, epochs = epochs, batches_per_epoch = batches_per_epoch,
-                  candidate_func = candidate_func, graph_labels=graph_labels)
-    print()
-    start2emb = time.time()
-    awe.train() # get embeddings
-    finish2emb = time.time()
-    print()
-    print('Time to compute embeddings: {:.2f} sec'.format(finish2emb - start2emb))
-    # E = np.load(RESULTS_FOLDER + '/' + dataset + '/embeddings.txt.npz')['E']
+    E = np.zeros((N, embedding_size_d))
+    for idx in range(N):
+        awe = AWE(dataset = dataset, batch_size = batch_size, window_size = window_size,
+                      embedding_size_w = embedding_size_w, embedding_size_d = embedding_size_d,
+                      num_samples = num_samples, concat = concat, loss_type = loss_type,
+                      optimize = optimize, learning_rate = learning_rate, root = root,
+                      ext = ext, steps = steps, epochs = epochs, batches_per_epoch = batches_per_epoch,
+                      candidate_func = candidate_func, graph_labels=graph_labels, graph_idxs=[idx])
+        # print()
+        start2emb = time.time()
+        awe.train() # get embeddings
+        finish2emb = time.time()
+        # print()
+        # print('Time to compute embeddings: {:.2f} sec'.format(finish2emb - start2emb))
+        E[idx, :] = awe.graph_embeddings[0]
+    E = np.load(RESULTS_FOLDER + '/' + dataset + '/embeddings.txt.npz')['E']
 
     gk = GraphKernel()
     gk.embeddings = awe.graph_embeddings
