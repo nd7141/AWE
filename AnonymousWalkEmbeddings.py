@@ -397,7 +397,7 @@ if __name__ == '__main__':
         # print()
         # print('Time to compute embeddings: {:.2f} sec'.format(finish2emb - start2emb))
         E[idx, :] = awe.graph_embeddings[0]
-    E = np.load(RESULTS_FOLDER + '/' + dataset + '/embeddings.txt.npz')['E']
+    # E = np.load(RESULTS_FOLDER + '/' + dataset + '/embeddings.txt.npz')['E']
 
     gk = GraphKernel()
     gk.embeddings = awe.graph_embeddings
