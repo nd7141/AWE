@@ -407,7 +407,7 @@ if __name__ == '__main__':
     for KERNEL in ['rbf', 'dot', 'poly']:
 
         if KERNEL == 'rbf':
-            sigma_grid = [1]
+            sigma_grid = [0.001, 0.01, 0.1, 1, 10]
         else:
             sigma_grid = [1]
 
