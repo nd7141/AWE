@@ -267,7 +267,7 @@ class AWE(object):
                 self.g2v.read_graphml(self.folder + graph_fn)
                 self.g2v.create_random_walk_graph()
 
-                print('Graph {}: {} nodes'.format(rank_id, doc_id, len(self.g2v.rw_graph)))
+                print('Graph {}: {} nodes'.format(rank_id, len(self.g2v.rw_graph)))
                 if self.flag2iterations == True: # take sample of N words per each graph with N nodes
                     self.batches_per_epoch = len(self.g2v.rw_graph)
 
@@ -384,6 +384,7 @@ if __name__ == '__main__':
     # initialize model
     E = np.zeros((N, embedding_size_d))
     for idx in range(N):
+        print('Graph -- {}'.format(idx))
         awe = AWE(dataset = dataset, batch_size = batch_size, window_size = window_size,
                       embedding_size_w = embedding_size_w, embedding_size_d = embedding_size_d,
                       num_samples = num_samples, concat = concat, loss_type = loss_type,
