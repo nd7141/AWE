@@ -254,7 +254,7 @@ class AWE(object):
         random.shuffle(random_order)
         for _ in range(self.epochs):
             print('Epoch: {}'.format(_))
-            for doc_id in random_order:
+            for rank_id, doc_id in enumerate(random_order):
             # for doc_id, graph_fn in enumerate(self.sorted_graphs):
                 graph_fn = self.sorted_graphs[doc_id]
                 time2graph = time.time()
@@ -263,7 +263,7 @@ class AWE(object):
                 self.g2v.read_graphml(self.folder + graph_fn)
                 self.g2v.create_random_walk_graph()
 
-                print('Graph {}: {} nodes'.format(doc_id, len(self.g2v.rw_graph)))
+                print('Graph {}: {} nodes'.format(rank_id, doc_id, len(self.g2v.rw_graph)))
                 if self.flag2iterations == True: # take sample of N words per each graph with N nodes
                     self.batches_per_epoch = len(self.g2v.rw_graph)
 
