@@ -399,11 +399,12 @@ if __name__ == '__main__':
         # print('Time to compute embeddings: {:.2f} sec'.format(finish2emb - start2emb))
         E[idx, :] = awe.graph_embeddings[0]
     # E = np.load(RESULTS_FOLDER + '/' + dataset + '/embeddings.txt.npz')['E']
-
+    print('Shape: ', E.shape)
     gk = GraphKernel()
-    gk.embeddings = awe.graph_embeddings
+    gk.embeddings = E
     # gk.embeddings = gk.load_embeddings(RESULTS_FOLDER + '/' + dataset + '/embeddings.txt.npz')
     gk.write_embeddings(RESULTS_FOLDER + '/' + dataset + '/embeddings.txt')
+    print('Shape: ', gk.embeddings)
 
     # read classes for each graph
     y = []
