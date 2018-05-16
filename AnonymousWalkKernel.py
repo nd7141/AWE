@@ -503,8 +503,11 @@ class GraphKernel(object):
         self.graphs = graphs
         self.__methods = ['dot', 'rbf', 'poly']
 
-    def kernel_value(self, v1, v2, method = 'dot', sigma = 1, c = 0, d = 2):
+    def kernel_value(self, v1, v2, method = 'dot', sigma = 'auto', c = 0, d = 2):
         '''Calculates kernel value between two vectors. Methods can be dot, rbf, poly. '''
+        if sigma == 'auto':
+            sigma = self.embeddings.shape[1]
+
         if method == 'dot':
             return np.array(v1).dot(v2)
         elif method == 'poly':
@@ -571,7 +574,7 @@ class GraphKernel(object):
             raise ValueError('Please, first run read_graphs to create graphs.')
 
     def kernel_matrix(self, kernel_method = 'rbf', build_embeddings = False, steps = 3, graph2vec_method = 'exact', MC = None, delta = 0.1, eps = 0.1,
-                      prop=True, labels = None,  keep_last = False, sigma = 1, c=0, d=2):
+                      prop=True, labels = None,  keep_last = False, sigma = 'auto', c=0, d=2):
         '''Computes a kernel matrix for a given matrix of embeddings.
 
         :param kernel_method: rbf, dot, poly
