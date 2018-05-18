@@ -8,6 +8,8 @@ from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 import argparse
 import re
+from collections import Counter
+import linecache
 
 class AnonymousWalks(object):
     '''
@@ -374,6 +376,27 @@ class AnonymousWalks(object):
             for i, node in enumerate(self.rw_graph):
                 aw = [str(walk_ids[self._random_walk_node(node, steps)]) for _ in range(neighborhood_size)]
                 f.write(' '.join(aw) + '\n')
+
+    def generate_file_batch(self, batch_size, window_size, doc_id, corpus_fn):
+        batch = np.ndarray(shape=(batch_size, window_size + 1), dtype=np.int32)
+        labels = np.ndarray(shape=(batch_size, 1), dtype=np.int32)
+
+        batch[:, window_size] = doc_id  # last column is for document id
+
+        # create a batch and labels
+        i = 0  # number of samples in the batch
+        c = Counter(np.random.choice(range(len(self.graph)), size = batch_size))
+        for line_idx in c:
+            line = linecache.getline(corpus_fn, line_idx+1)
+            neighborhood = list(map(int, line.strip().split()))
+            assert len(neighborhood) >= window_size + 1, 'Corpus neighborhood size should have be at least window_size'
+
+            for _ in range(c[line_idx]):
+                batch_sample = np.random.choice(neighborhood, window_size + 1, replace=False)
+                batch[i, :window_size] = batch_sample[:window_size]
+                labels[i, 0] = batch_sample[window_size]
+                i += 1
+        return batch, labels
 
     def _sampling(self, steps, MC, prop=True):
         '''Find anonymous walk distribution using sampling approach.
