@@ -73,7 +73,7 @@ class AnonymousWalks(object):
             total = float(sum([edges[v].get(label_name, 1) for v in edges if v != node]))
             for v in edges:
                 if v != node:
-                    RW.add_edge(node, v, {'weight': edges[v].get(label_name,1) / total})
+                    RW.add_edge(node, v, weight = edges[v].get(label_name,1) / total)
         self.rw_graph = RW
 
     def _all_paths(self, steps, keep_last = True):
@@ -367,6 +367,13 @@ class AnonymousWalks(object):
             batch[i, :window_size] = aw[:window_size]
             labels[i, 0] = aw[window_size]
         return batch, labels
+
+    def write_corpus(self, neighborhood_size, walk_ids, steps, output):
+        self.create_random_walk_graph()
+        with open(output, 'w+') as f:
+            for i, node in enumerate(self.rw_graph):
+                aw = [str(walk_ids[self._random_walk_node(node, steps)]) for _ in range(neighborhood_size)]
+                f.write(' '.join(aw) + '\n')
 
     def _sampling(self, steps, MC, prop=True):
         '''Find anonymous walk distribution using sampling approach.
