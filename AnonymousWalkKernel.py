@@ -377,6 +377,13 @@ class AnonymousWalks(object):
                 aw = [str(walk_ids[self._random_walk_node(node, steps)]) for _ in range(neighborhood_size)]
                 f.write(' '.join(aw) + '\n')
 
+    def write_corpus2(self, neighborhood_size, walk_ids, steps, output):
+        self.create_random_walk_graph()
+        with open(output, 'w+') as f:
+            for i, node in enumerate(self.rw_graph):
+                aw = Counter([str(walk_ids[self._random_walk_node(node, steps)]) for _ in range(neighborhood_size)])
+                f.write('{}\n'.format(aw.most_common(1)[0][0]))
+
     def generate_file_batch(self, batch_size, window_size, doc_id, corpus_fn):
         batch = np.ndarray(shape=(batch_size, window_size + 1), dtype=np.int32)
         labels = np.ndarray(shape=(batch_size, 1), dtype=np.int32)
