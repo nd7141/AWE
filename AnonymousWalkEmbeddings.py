@@ -16,6 +16,7 @@ import argparse
 import sys
 import time
 import re
+import threading
 
 import numpy as np
 import tensorflow as tf
@@ -49,7 +50,8 @@ class AWE(object):
                  epochs = 1,
                  batches_per_epoch = 1,
                  candidate_func = None,
-                 graph_labels = None):
+                 graph_labels = None,
+                 regenerate_corpus = False):
         '''
         Initialize AWE model.
         :param dataset: name of the dataset and corresponding name of the folder.
@@ -92,11 +94,11 @@ class AWE(object):
 
         self.batches_per_epoch = batches_per_epoch
 
+
         # switch to have batches_per_epoch = N for every graph with N nodes
         self.flag2iterations = False
         if batches_per_epoch is None:
             self.flag2iterations = True
-
 
         # get all graph filenames (document size)
         self.folder = self.ROOT + self.dataset + '/'
@@ -107,6 +109,9 @@ class AWE(object):
         print('Number of graphs: {}'.format(self.document_size))
 
         print('Generating corpus... ', end='')
+        self.corpus_fn_name = '{}.gexf.g2v3'
+        self.regenerate_corpus = regenerate_corpus
+        print(regenerate_corpus)
         start2gen = time.time()
         self.generate_corpus()
         print('Finished {}'.format(time.time() - start2gen))
@@ -136,15 +141,18 @@ class AWE(object):
         for i, path in enumerate(self.g2v.paths[self.steps]):
             self.walk_ids[tuple(path)] = i
 
-        for en, graph_fn in enumerate(self.sorted_graphs):
-            print(en)
-            g2v = AnonymousWalks()
-            g2v.read_graphml(self.folder + graph_fn)
-            # self.window_size*n is the number of anonymous walks per node to generate neighborhood
-            # TODO maybe fix to some parameter
+        if self.regenerate_corpus == True or not os.path.exists(self.ROOT + self.dataset + '_corpus/'):
             if not os.path.exists(self.ROOT + self.dataset + '_corpus/'):
                 os.mkdir(self.ROOT + self.dataset + '_corpus/')
-            g2v.write_corpus(self.window_size*2, self.walk_ids, steps, self.ROOT + self.dataset + '_corpus/graph{}_corpus.txt'.format(en))
+
+            for en, graph_fn in enumerate(self.sorted_graphs):
+                print(en)
+                g2v = AnonymousWalks()
+                g2v.read_graphml(self.folder + graph_fn)
+                # self.window_size*n is the number of anonymous walks per node to generate neighborhood
+                # TODO maybe fix to some parameter
+                g2v.write_corpus(self.window_size*2, self.walk_ids, steps,
+                                 self.ROOT + self.dataset + '_corpus/{}'.format(self.corpus_fn_name.format(en)))
 
     def _init_graph(self):
         '''
@@ -241,7 +249,7 @@ class AWE(object):
         '''Train model on random anonymous walk batches.'''
         while True:
             batch_data, batch_labels = self.g2v.generate_file_batch(batch_size, window_size, self.doc_id,
-                                                                    self.folder + 'graph{}_corpus.txt'.format(self.doc_id))
+                                                                    self.ROOT + self.dataset + '_corpus/{}'.format(self.corpus_fn_name.format(self.doc_id)))
             # batch_data, batch_labels = self.g2v.generate_random_batch(batch_size=self.batch_size,
             #                                                         window_size=self.window_size,
             #                                                         steps=self.steps, walk_ids=self.walk_ids,
@@ -272,8 +280,8 @@ class AWE(object):
         print('Initialized')
         random_order = list(range(len(self.sorted_graphs)))
         random.shuffle(random_order)
-        for _ in range(self.epochs):
-            print('Epoch: {}'.format(_))
+        for ep in range(self.epochs):
+            print('Epoch: {}'.format(ep))
             for rank_id, doc_id in enumerate(random_order):
             # for doc_id, graph_fn in enumerate(self.sorted_graphs):
                 graph_fn = self.sorted_graphs[doc_id]
@@ -283,7 +291,7 @@ class AWE(object):
                 self.g2v.read_graphml(self.folder + graph_fn)
                 self.g2v.create_random_walk_graph()
 
-                print('{}-{}. Graph-{}: {} nodes'.format(_, rank_id, doc_id, len(self.g2v.rw_graph)))
+                print('{}-{}. Graph-{}: {} nodes'.format(ep, rank_id, doc_id, len(self.g2v.rw_graph)))
                 if self.flag2iterations == True: # take sample of N words per each graph with N nodes
                     self.batches_per_epoch = len(self.g2v.rw_graph)
 
@@ -303,22 +311,22 @@ if __name__ == '__main__':
     random.seed(SEED)
     np.random.seed(SEED)
 
-    dataset = 'imdb_b'
+    dataset = 'mutag'
 
-    batch_size = 10
-    window_size = 32
-    embedding_size_w = 128
-    embedding_size_d = 128
-    num_samples = 128
+    batch_size = 128
+    window_size = 4
+    embedding_size_w = 1024
+    embedding_size_d = 1024
+    num_samples = 10
 
     concat = False
     loss_type = 'nce'
     optimize = 'Adagrad'
-    learning_rate = 1.0
+    learning_rate = 0.3
     root = '../Datasets/'
     ext = 'graphml'
-    steps = 7
-    epochs = 2
+    steps = 4
+    epochs = 1
     batches_per_epoch = 100
     candidate_func = None
     graph_labels = None
@@ -326,6 +334,8 @@ if __name__ == '__main__':
     KERNEL = 'rbf'
     RESULTS_FOLDER = 'doc2vec_results2/'
     TRIALS = 10  # number of cross-validation
+
+    regenerate_corpus = True
 
     parser = argparse.ArgumentParser(description='Getting classification accuracy for Graph Kernel Methods')
 
@@ -351,6 +361,8 @@ if __name__ == '__main__':
     parser.add_argument('--candidate_func', default=candidate_func, help='Sampling function for negatives: uniform or loguniform (None, by default)')
     parser.add_argument('--graph_labels', default=graph_labels,
                         help='Graph labels to use (none, nodes, edges, edges_nodes)')
+    parser.add_argument('--regenerate_corpus', default=regenerate_corpus, type=bool,
+                        help='If regenerate corpus for training. ')
 
 
 
@@ -377,6 +389,8 @@ if __name__ == '__main__':
     candidate_func = args.candidate_func
     graph_labels = args.graph_labels
 
+    regenerate_corpus = args.regenerate_corpus
+
     if not os.path.exists(RESULTS_FOLDER):
         os.makedirs(RESULTS_FOLDER)
 
@@ -402,7 +416,7 @@ if __name__ == '__main__':
                   num_samples = num_samples, concat = concat, loss_type = loss_type,
                   optimize = optimize, learning_rate = learning_rate, root = root,
                   ext = ext, steps = steps, epochs = epochs, batches_per_epoch = batches_per_epoch,
-                  candidate_func = candidate_func, graph_labels=graph_labels)
+                  candidate_func = candidate_func, graph_labels=graph_labels, regenerate_corpus=regenerate_corpus)
     # print()
     # start2emb = time.time()
     # awe.train() # get embeddings
@@ -442,7 +456,7 @@ if __name__ == '__main__':
     # for KERNEL in ['rbf', 'dot', 'poly']:
     #
     #     if KERNEL == 'rbf':
-    #         sigma_grid = [0.001, 0.01, 0.1, 1, 10]
+    #         sigma_grid = [0.1, 1, 10]
     #     else:
     #         sigma_grid = [1]
     #
