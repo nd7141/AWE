@@ -78,7 +78,7 @@ class AnonymousWalks(object):
                     RW.add_edge(node, v, weight = edges[v].get(label_name,1) / total)
         self.rw_graph = RW
 
-    def _all_paths(self, steps, keep_last = True):
+    def _all_paths(self, steps, keep_last = False):
         '''Get all possible anonymous walks of length up to steps.'''
         paths = []
         last_step_paths = [[0, 1]]
@@ -370,21 +370,24 @@ class AnonymousWalks(object):
             labels[i, 0] = aw[window_size]
         return batch, labels
 
-    def write_corpus(self, neighborhood_size, walk_ids, steps, output):
+    def write_corpus(self, neighborhood_size, walk_ids, steps, labels, output):
         self.create_random_walk_graph()
         with open(output, 'w+') as f:
             for i, node in enumerate(self.rw_graph):
-                aw = [str(walk_ids[self._random_walk_node(node, steps)]) for _ in range(neighborhood_size)]
+                # aw = [str(walk_ids[self._random_walk_node(node, steps)]) for _ in range(neighborhood_size)]
+                aw = [str(walk_ids[self._anonymous_walk(node, steps, labels)]) for _ in range(neighborhood_size)]
+                if len(aw) != 1 and len(set(aw)) == 1: # sanity check
+                    continue
                 f.write(' '.join(aw) + '\n')
 
-    def write_corpus2(self, neighborhood_size, walk_ids, steps, output):
+    def write_corpus2(self, neighborhood_size, walk_ids, steps, labels, output):
         self.create_random_walk_graph()
         with open(output, 'w+') as f:
             for i, node in enumerate(self.rw_graph):
-                aw = Counter([str(walk_ids[self._random_walk_node(node, steps)]) for _ in range(neighborhood_size)])
+                aw = Counter([str(walk_ids[self._anonymous_walk(node, steps, labels)]) for _ in range(neighborhood_size)])
                 f.write('{}\n'.format(aw.most_common(1)[0][0]))
 
-    def generate_file_batch(self, batch_size, window_size, doc_id, corpus_fn):
+    def generate_file_batch(self, batch_size, window_size, doc_id, corpus_fn, number_nodes):
         batch = np.ndarray(shape=(batch_size, window_size + 1), dtype=np.int32)
         labels = np.ndarray(shape=(batch_size, 1), dtype=np.int32)
 
@@ -392,11 +395,17 @@ class AnonymousWalks(object):
 
         # create a batch and labels
         i = 0  # number of samples in the batch
-        c = Counter(np.random.choice(range(len(self.graph)), size = batch_size))
+        with open(corpus_fn) as f:
+            lines = f.readlines()
+        # len(lines) - 1 number of stored neighborhoods
+        c = Counter(np.random.choice(range(len(lines) - 1), size = batch_size))
         for line_idx in c:
-            line = linecache.getline(corpus_fn, line_idx+1)
+            line = lines[line_idx]
+            # line = linecache.getline(corpus_fn, line_idx+1)
             neighborhood = list(map(int, line.strip().split()))
-            assert len(neighborhood) >= window_size + 1, 'Corpus neighborhood size should have be at least window_size'
+
+            assert len(neighborhood) >= window_size + 1, '''Corpus neighborhood size should have be at least window_size. 
+            Instead got {} neighborhood and window = {}'''.format(len(neighborhood), window_size)
 
             for _ in range(c[line_idx]):
                 batch_sample = np.random.choice(neighborhood, window_size + 1, replace=False)
@@ -538,14 +547,14 @@ class GraphKernel(object):
     def __init__(self, graphs = None):
         self.gv = AnonymousWalks()
         self.graphs = graphs
-        self.__methods = ['dot', 'rbf', 'poly']
+        self.__methods = ['linear', 'rbf', 'poly']
 
-    def kernel_value(self, v1, v2, method = 'dot', sigma = 'auto', c = 0, d = 2):
-        '''Calculates kernel value between two vectors. Methods can be dot, rbf, poly. '''
+    def kernel_value(self, v1, v2, method = 'linear', sigma = 'auto', c = 0, d = 2):
+        '''Calculates kernel value between two vectors. Methods can be linear, rbf, poly. '''
         if sigma == 'auto':
             sigma = self.embeddings.shape[1]
 
-        if method == 'dot':
+        if method == 'linear':
             return np.array(v1).dot(v2)
         elif method == 'poly':
             return (np.array(v1).dot(v2) + c)**d
@@ -614,7 +623,7 @@ class GraphKernel(object):
                       prop=True, labels = None,  keep_last = False, sigma = 'auto', c=0, d=2):
         '''Computes a kernel matrix for a given matrix of embeddings.
 
-        :param kernel_method: rbf, dot, poly
+        :param kernel_method: rbf, linear, poly
         :param sigma: sigma for rbf method
         :param graph2vec_method: exact or sampling
         :param steps: length of anonymous walk
@@ -823,7 +832,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description = 'Getting classification accuracy for Graph Kernel Methods')
     parser.add_argument('--dataset', default = DATASET, help = 'Dataset with graphs to classify')
     parser.add_argument('--steps', default = STEPS, help = 'Number of steps for anonymous walk', type = int)
-    parser.add_argument('--kernel', default = KERNEL, help = 'Kernel type: rbf or dot')
+    parser.add_argument('--kernel', default = KERNEL, help = 'Kernel type: rbf or linear or poly')
 
     parser.add_argument('--proportion', default = PROP, help = 'Convert embeddings to be in [0,1]', type = bool)
     parser.add_argument('--labels', default = LABELS, help = 'Labels: edges, nodes, edges_nodes')
