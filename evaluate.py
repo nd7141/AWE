@@ -34,7 +34,7 @@ if __name__ == '__main__':
     np.random.seed(SEED)
 
     dataset = 'mutag'
-    RESULTS_FOLDER = 'doc2vec_results2/'
+    RESULTS_FOLDER = 'doc2vec_results/'
     TRIALS = 10  # number of cross-validation
     root = '../Datasets/'
     check_intervals = 60
@@ -57,6 +57,7 @@ if __name__ == '__main__':
     if not os.path.exists(RESULTS_FOLDER + '/' + dataset):
         os.makedirs(RESULTS_FOLDER + '/' + dataset)
 
+    print('Start evaluating')
     print('DATASET: {}'.format(dataset))
     print('')
 
