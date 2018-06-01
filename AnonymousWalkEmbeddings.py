@@ -310,7 +310,7 @@ class AWE(object):
                     print('Time: {}'.format(time.time() - time2graph))
             print('Time for epoch', time.time() - time2epoch)
             # save temporary embeddings
-            if not ep%2:
+            if not ep%10:
                 self.graph_embeddings = session.run(self.normalized_doc_embeddings)
                 np.savez_compressed(RESULTS_FOLDER + '/' + dataset +  '/tmp/embeddings_{}.txt'.format(ep), E=self.graph_embeddings)
 
@@ -384,9 +384,9 @@ if __name__ == '__main__':
     dataset = 'mutag'
 
     batch_size = 128
-    window_size = 0
-    embedding_size_w = 16
-    embedding_size_d = 16
+    window_size = 16
+    embedding_size_w = 64
+    embedding_size_d = 64
     num_samples = 10
 
     concat = False
@@ -402,11 +402,11 @@ if __name__ == '__main__':
     graph_labels = None
 
     KERNEL = 'rbf'
-    RESULTS_FOLDER = 'doc2vec_results2/'
+    RESULTS_FOLDER = 'doc2vec_results/'
     TRIALS = 10  # number of cross-validation
 
     regenerate_corpus = True
-    neighborhood_size = 1
+    neighborhood_size = window_size + 1
 
     parser = argparse.ArgumentParser(description='Getting classification accuracy for Graph Kernel Methods')
 
