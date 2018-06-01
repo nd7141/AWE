@@ -293,7 +293,7 @@ class AWE(object):
             for rank_id, doc_id in enumerate(random_order):
             # for doc_id, graph_fn in enumerate(self.sorted_graphs):
             #     graph_fn = self.sorted_graphs[doc_id]
-                print('Graph {}-{}'.format(ep, rank_id))
+
                 time2graph = time.time()
                 self.sample = 0
                 self.doc_id = doc_id
@@ -306,9 +306,9 @@ class AWE(object):
 
                 self._train_thread_body()
 
-                if doc_id % 10 == 0:
-                    print('Time: {}'.format(time.time() - time2graph))
-            print('Time for epoch', time.time() - time2epoch)
+                if rank_id > 0 and not rank_id%100:
+                    print('Graph {}-{}: {:.2f}'.format(ep, rank_id, time.time() - time2graph))
+            print('Time for epoch {}: {:.2f}'.format(ep, time.time() - time2epoch))
             # save temporary embeddings
             if not ep%10:
                 self.graph_embeddings = session.run(self.normalized_doc_embeddings)
