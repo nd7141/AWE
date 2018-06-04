@@ -146,19 +146,23 @@ class AWE(object):
 
         self.nodes_per_graphs = dict()
 
-        if self.regenerate_corpus == True or not os.path.exists(self.ROOT + self.dataset + '_corpus/'):
-            if not os.path.exists(self.ROOT + self.dataset + '_corpus/'):
-                os.mkdir(self.ROOT + self.dataset + '_corpus/')
+        label_suffix = ''
+        if graph_labels is not None:
+            label_suffix = '_' + graph_labels
+
+        if self.regenerate_corpus == True or not os.path.exists(self.ROOT + self.dataset + '_corpus' + label_suffix):
+            if not os.path.exists(self.ROOT + self.dataset + '_corpus' + label_suffix):
+                os.mkdir(self.ROOT + self.dataset + '_corpus' + label_suffix)
 
             for en, graph_fn in enumerate(self.sorted_graphs):
                 print(en)
                 g2v = AnonymousWalks()
                 g2v.read_graphml(self.folder + graph_fn)
                 self.nodes_per_graphs[en] = len(g2v.graph)
-                # 20 is the number of anonymous walks per node to generate neighborhood
-                # TODO maybe fix to some parameter
+
+
                 g2v.write_corpus(self.neiborhood_size, self.walk_ids, steps, self.graph_labels,
-                                 self.ROOT + self.dataset + '_corpus/{}'.format(self.corpus_fn_name.format(en)))
+                                 self.ROOT + self.dataset + '_corpus{}/{}'.format(label_suffix, self.corpus_fn_name.format(en)))
 
     def _init_graph(self):
         '''
@@ -253,9 +257,13 @@ class AWE(object):
 
     def _train_thread_body(self):
         '''Train model on random anonymous walk batches.'''
+        label_suffix = ''
+        if self.graph_labels is not None:
+            label_suffix = '_' + graph_labels
+
         while True:
             batch_data, batch_labels = self.g2v.generate_file_batch(batch_size, window_size, self.doc_id,
-                                                                    self.ROOT + self.dataset + '_corpus/{}'.format(self.corpus_fn_name.format(self.doc_id)),
+                                                                    self.ROOT + self.dataset + '_corpus{}/{}'.format(label_suffix, self.corpus_fn_name.format(self.doc_id)),
                                                                     self.nodes_per_graphs[self.doc_id])
             # batch_data, batch_labels = self.g2v.generate_random_batch(batch_size=self.batch_size,
             #                                                         window_size=self.window_size,
@@ -399,7 +407,7 @@ if __name__ == '__main__':
     epochs = 11
     batches_per_epoch = 100
     candidate_func = None
-    graph_labels = None
+    graph_labels = 'edges'
 
     KERNEL = 'rbf'
     RESULTS_FOLDER = 'doc2vec_results/'

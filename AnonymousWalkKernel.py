@@ -376,8 +376,8 @@ class AnonymousWalks(object):
             for i, node in enumerate(self.rw_graph):
                 # aw = [str(walk_ids[self._random_walk_node(node, steps)]) for _ in range(neighborhood_size)]
                 aw = [str(walk_ids[self._anonymous_walk(node, steps, labels)]) for _ in range(neighborhood_size)]
-                if len(aw) != 1 and len(set(aw)) == 1: # sanity check
-                    continue
+                # if len(aw) != 1 and len(set(aw)) == 1: # sanity check
+                #     continue
                 f.write(' '.join(aw) + '\n')
 
     def write_corpus2(self, neighborhood_size, walk_ids, steps, labels, output):
@@ -398,6 +398,8 @@ class AnonymousWalks(object):
         with open(corpus_fn) as f:
             lines = f.readlines()
         # len(lines) - 1 number of stored neighborhoods
+        if len(lines) <= 1:
+            print(lines, corpus_fn)
         c = Counter(np.random.choice(range(len(lines) - 1), size = batch_size))
         for line_idx in c:
             line = lines[line_idx]
