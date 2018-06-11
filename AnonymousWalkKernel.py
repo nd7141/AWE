@@ -576,9 +576,9 @@ class GraphKernel(object):
             self.graphs = []
             for filename in filenames:
                 if filename.split('.')[-1] == 'graphml':
-                    G = self.gv.read_graphml(filename)
+                    G = self.gv.read_graphml(folder + '/' + filename)
                 else:
-                    G = self.gv.read_graph_from_text(filename, header, weights, sep, directed)
+                    G = self.gv.read_graph_from_text(folder + '/' + filename, header, weights, sep, directed)
                 self.graphs.append(G)
         elif folder is not None:
             self.graphs = []
@@ -609,11 +609,14 @@ class GraphKernel(object):
             N = len(self.graphs)
             self.gv.graph = self.graphs[0]
             v, d = self.gv.embed(steps = steps, method = graph2vec_method, MC = MC, delta = delta, eps = eps, prop=prop, labels=labels, verbose=False, keep_last = keep_last)
+            if MC:
+                print('Use {} ({}) samples'.format(MC, self.gv.n_samples(steps, delta, eps)))
             L = len(v)
+            print('Dimension size: {}'.format(L))
             self.embeddings = np.zeros(shape=(N,L))
             self.embeddings[0] = v
             for ix, G in enumerate(self.graphs[1:]):
-                if ix % 100 == 0:
+                if ix % 10 == 0:
                     print('Processing {} graph'.format(ix))
                 self.gv.graph = G
                 v, d = self.gv.embed(steps = steps, method = graph2vec_method, MC = MC, delta = delta, eps = eps, prop=prop, labels=labels, verbose=False, keep_last = keep_last)
@@ -818,23 +821,23 @@ if __name__ == '__main__':
 
     TRIALS = 10 # number of cross-validation
 
-    STEPS = 2
-    KERNEL = 'rbf'
-    DATASET = 'imdb_binary'
-    METHOD  = 'exact'
+    STEPS = 10
+    DATASET = 'mutag'
+    METHOD  = 'sampling'
     LABELS = None
     PROP = True
-    MC = None
+    MC = 10000
     DELTA = 0.1
     EPSILON = 0.1
     C = 0
     D = 1
+    root = '../Datasets/'
+    RESULTS_FOLDER = 'kernel_results/'
 
 
     parser = argparse.ArgumentParser(description = 'Getting classification accuracy for Graph Kernel Methods')
     parser.add_argument('--dataset', default = DATASET, help = 'Dataset with graphs to classify')
     parser.add_argument('--steps', default = STEPS, help = 'Number of steps for anonymous walk', type = int)
-    parser.add_argument('--kernel', default = KERNEL, help = 'Kernel type: rbf or linear or poly')
 
     parser.add_argument('--proportion', default = PROP, help = 'Convert embeddings to be in [0,1]', type = bool)
     parser.add_argument('--labels', default = LABELS, help = 'Labels: edges, nodes, edges_nodes')
@@ -845,11 +848,13 @@ if __name__ == '__main__':
     parser.add_argument('--epsilon', default=EPSILON, help='Delta of deviation to estimate number of samples.', type = float)
     parser.add_argument('--C', default=C, help='Free term of polynomial kernel.', type=float)
     parser.add_argument('--D', default=D, help='Power of polynomial kernel.', type=float)
+    parser.add_argument('--root', default=root, help='Root folder of dataset')
+    parser.add_argument('--results_folder', default=RESULTS_FOLDER, help='Folder to store results')
+
 
     args = parser.parse_args()
 
     STEPS = args.steps
-    KERNEL = args.kernel
     DATASET = args.dataset
     METHOD = args.method
     LABELS = args.labels
@@ -859,81 +864,101 @@ if __name__ == '__main__':
     EPSILON = args.epsilon
     C = args.C
     D = args.D
+    root = args.root
+    RESULTS_FOLDER  = args.results_folder
 
+    print('Dataset', 'Steps', 'MC', 'Labels')
+    print(DATASET, STEPS, MC, LABELS)
 
     # create a folder for each dataset with output results
-    RESULTS_FOLDER = '{}/kernels_v5/'.format(DATASET)
     if not os.path.exists(RESULTS_FOLDER):
         os.makedirs(RESULTS_FOLDER)
 
+    if not os.path.exists(RESULTS_FOLDER + '/' + DATASET):
+        os.makedirs(RESULTS_FOLDER + '/' + DATASET)
+
     # read labels for each graph
-    with open(DATASET + '/labels.txt') as f:
-        y = np.array(list(map(int, f.readlines())))
+    y = []
+    with open(root + DATASET + '/labels.txt') as f:
+        for line in f:
+            y.extend(list(map(int, line.strip().split())))
+    y = np.array(y)
+
+    # folder_graphs = filter(lambda g: g.endswith(max('graphml', '')), os.listdir(root + DATASET))
+    # sorted_graphs = np.array(sorted(folder_graphs, key=lambda g: int(re.findall(r'\d+', g)[0])))
+
+    # random_order = list(range(len(y)))
+    # np.random.shuffle(random_order)
+
+    # filenames = sorted_graphs[random_order]
+    # y = y[random_order]
 
     # create an instance of a graph kernel and read all graphs
     gk = GraphKernel()
-    gk.read_graphs(folder=DATASET, ext='graphml')
+    gk.read_graphs(filenames = None, folder=root + DATASET, ext='graphml')
+    gk.embed_graphs(graph2vec_method = METHOD, steps = STEPS, MC = MC, delta = DELTA, eps = EPSILON,
+                     labels=LABELS, prop=True, keep_last = True)
 
-    print('Read {} graphs'.format(len(gk.graphs)))
-    sys.stdout.flush()
+    ### testing on embeddings
+    for _ in range(3):
+        E = gk.embeddings
+        idx_train, idx_test = train_test_split(list(range(E.shape[0])), test_size=0.2)
+        E_train = E[idx_train, :]
+        y_train = y[idx_train]
+        E_test = E[idx_test, :]
+        y_test = y[idx_test]
 
-    if KERNEL == 'rbf':
-        sigma_grid = [0.0001, 0.001, 0.01, 0.1, 1, 10, 20]
-    else:
-        sigma_grid = [1]
+        model = svm.SVC(kernel='rbf', gamma = 0.001)
+        model.fit(E_train, y_train)
+        y_predicted = model.predict(E_test)
+        print('On Embeddings:', accuracy_score(y_test, y_predicted))
 
-    for LABELS in [None]:#, 'nodes', 'edges', 'edges_nodes']:
-        try:
-            for PROP in [True, False]:
-                flag = True
-                # cross-validation on sigma
-                for s_ix in range(len(sigma_grid)):
-                    print(DATASET, KERNEL, LABELS, STEPS, PROP, sigma_grid[s_ix])
-                    sys.stdout.flush()
+    ################## Estimate results: Classification Accuracy ########################
+    print()
+    for KERNEL in ['rbf', 'linear', 'poly']:
 
-                    start2kernelmatrix = time.time()
-                    gk.kernel_matrix(kernel_method=KERNEL, graph2vec_method=METHOD, steps=STEPS, prop=PROP, labels=LABELS,
-                                     sigma=sigma_grid[s_ix], MC=MC, delta = DELTA, eps = EPSILON,
-                                     build_embeddings=flag, keep_last=False, c = C, d = D)
-                    finish2kernelmatrix = time.time()
-                    print('Time to compute Kernel Matrix: ', finish2kernelmatrix - start2kernelmatrix)
-                    sys.stdout.flush()
+        if KERNEL == 'rbf':
+            sigma_grid = [0.00001, 0.0001, 0.001, 0.01, 0.1, 1, 10]
+        else:
+            sigma_grid = [1]
 
-                    flag = False
-                    # write kernel matrix and embeddings
-                    # gk.write_kernel_matrix(
-                    #     '{}/kernel_{}_{}_{}_{}_{:.2f}_labels.txt'.format(RESULTS_FOLDER, DATASET, KERNEL, LABELS, PROP,
-                    #                                                      sigma_grid[s_ix]))
-                    # gk.write_embeddings('{}/embeddings_{}_{}_{}_labels.txt'.format(RESULTS_FOLDER, DATASET, LABELS, PROP))
+        # try:
+        for s_ix in range(len(sigma_grid)):
+            print('Setup: ', DATASET, KERNEL, sigma_grid[s_ix])
+            sys.stdout.flush()
 
-                    N, M = gk.K.shape
-                    print('Kernel matrix shape: {}x{}'.format(N, M))
-                    sys.stdout.flush()
+            print('Computing Kernel Matrix...')
+            start2kernelmatrix = time.time()
+            gk.kernel_matrix(kernel_method=KERNEL, build_embeddings=False, sigma=sigma_grid[s_ix])
+            finish2kernelmatrix = time.time()
+            print('Time to compute Kernel Matrix: ', finish2kernelmatrix - start2kernelmatrix)
+            sys.stdout.flush()
 
-                    # run SVM with cross-validation on C
-                    optimal_val_scores = []
-                    optimal_test_scores = []
-                    for _ in range(TRIALS):
-                        start2SVM = time.time()
-                        val, test, C = gk.run_SVM(y, alpha=.9, features='kernels')
-                        finish2SVM = time.time()
-                        print('{} Time to run SVM: {:.2f}'.format(_, finish2SVM - start2SVM))
-                        optimal_val_scores.append(val)
-                        optimal_test_scores.append(test)
-                        print(val, test, C)
+            N, M = gk.K.shape
+            print('Kernel matrix shape: {}x{}'.format(N, M))
+            sys.stdout.flush()
 
-                    print('Average Performance on Validation:', np.mean(optimal_val_scores))
-                    print('Average Performance on Test: {:.2f}% +-{:.2f}%'.format(np.mean(optimal_test_scores),
-                                                                                  np.std(optimal_test_scores)))
-                    sys.stdout.flush()
-                    # append results of dataset to the file
-                    with open('{}/performance_{}_{}_{}.txt'.format(RESULTS_FOLDER, DATASET, KERNEL, STEPS), 'a') as f:
-                        f.write('{} {} {} {} {} {} {} {} {} {}\n'.format(DATASET, KERNEL, LABELS, STEPS, PROP, METHOD, sigma_grid[s_ix],
-                                                                   np.mean(optimal_test_scores), np.std(optimal_test_scores),
-                                                                      finish2kernelmatrix - start2kernelmatrix))
-        except Exception as e:
-            print('ERROR FOR', DATASET, KERNEL, LABELS, STEPS, PROP)
-
-
+            # run k-fold SVM with cross-validation on C
+            print('Evaluating Kernel Matrix on SVM...')
+            ev = Evaluation(gk.K, y, verbose=False)
+            optimal_test_scores = []
+            for _ in range(TRIALS):
+                print(TRIALS - _, end=' ')
+                sys.stdout.flush()
+                accs = ev.evaluate()
+                optimal_test_scores.extend(accs)
+            print()
+            print('Average Performance on Test: {:.2f}% +-{:.2f}%'.format(100 * np.mean(optimal_test_scores),
+                                                                          100 * np.std(optimal_test_scores)))
+            sys.stdout.flush()
+            # append results of dataset to the file
+            with open('{}/{}/performance.txt'.format(RESULTS_FOLDER, DATASET), 'a') as f:
+                f.write('{} {} {} {} {} {} {}\n'.format(DATASET, KERNEL, STEPS, sigma_grid[s_ix],
+                                                        np.mean(optimal_test_scores), np.std(optimal_test_scores),
+                                                        finish2kernelmatrix - start2kernelmatrix))
+            print()
+        # except Exception as e:
+        #     print('ERROR FOR', dataset, KERNEL, steps)
+        #     raise e
 
     console = []
