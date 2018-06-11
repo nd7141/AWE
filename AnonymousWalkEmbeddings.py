@@ -16,6 +16,7 @@ import argparse
 import sys
 import time
 import re
+import shutil
 import threading
 from collections import Counter
 
@@ -111,10 +112,9 @@ class AWE(object):
         print('Number of graphs: {}'.format(self.document_size))
 
         print('Generating corpus... ', end='')
-        self.corpus_fn_name = '{}.gexf.g2v3'
+        self.corpus_fn_name = '{}.corpus'
         self.regenerate_corpus = regenerate_corpus
         self.neiborhood_size = neighborhood_size
-        print(regenerate_corpus, neighborhood_size)
         start2gen = time.time()
         self.generate_corpus()
         print('Finished {}'.format(time.time() - start2gen))
@@ -155,7 +155,8 @@ class AWE(object):
                 os.mkdir(self.ROOT + self.dataset + '_corpus' + label_suffix)
 
             for en, graph_fn in enumerate(self.sorted_graphs):
-                print(en)
+                if en > 0 and not en%100:
+                    print(f"Graph {en}")
                 g2v = AnonymousWalks()
                 g2v.read_graphml(self.folder + graph_fn)
                 self.nodes_per_graphs[en] = len(g2v.graph)
@@ -326,62 +327,6 @@ class AWE(object):
 
         return self
 
-    def train2(self):
-        session = self.sess
-
-        session.run(self.init_op)
-
-        # E = session.run(self.word_embeddings)
-        # np.savetxt('before_training.txt', E, fmt='%.2f')
-
-        self.average_loss = 0
-        self.global_step = 0
-        print('Initialized')
-
-        batch_data = np.ndarray(shape=(batch_size, window_size + 1), dtype=np.int32)
-        batch_labels = np.ndarray(shape=(batch_size, 1), dtype=np.int32)
-        target_words = []
-        context_words = []
-        updates_per_graph = dict()
-        random_order = list(range(len(self.sorted_graphs)))
-        for ep in range(self.epochs):
-            print('Epoch: {}'.format(ep))
-            random.shuffle(random_order)
-            time2epoch = time.time()
-            for rank_id, doc_id in enumerate(random_order):
-                with open(self.ROOT + self.dataset + '_corpus/{}'.format(self.corpus_fn_name.format(doc_id))) as f:
-                    for line in f:
-                        context_words.append(int(line))
-                        target_words.append(doc_id)
-
-                        updates_per_graph[doc_id] = updates_per_graph.get(doc_id, 0) + 1
-
-                        # fire the batch to the training
-                        if len(context_words) == batch_size:
-                            batch_data[:, 0] = target_words
-                            batch_labels[:, 0] = context_words
-                            feed_dict = {self.train_dataset: batch_data, self.train_labels: batch_labels}
-                            op, l = self.sess.run([self.optimizer, self.loss], feed_dict=feed_dict)
-                            self.global_step += 1
-                            target_words = []
-                            context_words = []
-
-                            self.average_loss += l
-                            if self.global_step % 100 == 0:
-                                # The average loss is an estimate of the loss over the last 100 batches.
-                                print('Average loss at step %d: %f' % (self.global_step, self.average_loss))
-                                self.average_loss = 0
-            print('Time for epoch {}: {:.2f} sec'.format(ep, time.time() - time2epoch))
-
-        # E = session.run(self.word_embeddings)
-        # np.savetxt('after_training.txt', E, fmt='%.2f')
-
-        self.graph_embeddings = session.run(self.normalized_doc_embeddings)
-
-        self.updates = updates_per_graph
-
-        return self
-
 if __name__ == '__main__':
 
     # Set random seeds
@@ -391,23 +336,23 @@ if __name__ == '__main__':
 
     dataset = 'mutag'
 
-    batch_size = 128
+    batch_size = 100
     window_size = 16
-    embedding_size_w = 64
-    embedding_size_d = 64
+    embedding_size_w = 128
+    embedding_size_d = 128
     num_samples = 10
 
     concat = False
-    loss_type = 'nce'
+    loss_type = 'sampled_softmax'
     optimize = 'Adagrad'
-    learning_rate = 0.3
+    learning_rate = 0.1
     root = '../Datasets/'
     ext = 'graphml'
-    steps = 5
-    epochs = 11
+    steps = 10
+    epochs = 100
     batches_per_epoch = 100
     candidate_func = None
-    graph_labels = 'edges'
+    graph_labels = None
 
     KERNEL = 'rbf'
     RESULTS_FOLDER = 'doc2vec_results/'
@@ -509,13 +454,12 @@ if __name__ == '__main__':
     finish2emb = time.time()
     print()
     print('Time to compute embeddings: {:.2f} sec'.format(finish2emb - start2emb))
-    # E = np.load(RESULTS_FOLDER + '/' + dataset + '/embeddings.txt.npz')['E']
+    # E = np.load('imdb_b.embeddings.txt')['E']
 
     gk = GraphKernel()
     gk.embeddings = awe.graph_embeddings
     gk.write_embeddings(RESULTS_FOLDER + '/' + dataset + '/embeddings.txt')
-    # gk.embeddings = gk.load_embeddings(RESULTS_FOLDER + '/' + dataset + '/embeddings.txt.npz')
-    print(gk.embeddings[:3, :3])
+    # gk.embeddings = E
 
     # read classes for each graph
     y = []
@@ -525,7 +469,8 @@ if __name__ == '__main__':
     y = np.array(y)
 
     ### testing on embeddings
-    for _ in range(3):
+    accuracies = []
+    for _ in range(10):
         E = gk.embeddings
         idx_train, idx_test = train_test_split(list(range(E.shape[0])), test_size=0.2)
         E_train = E[idx_train, :]
@@ -533,17 +478,19 @@ if __name__ == '__main__':
         E_test = E[idx_test, :]
         y_test = y[idx_test]
 
-        model = svm.SVC(kernel='rbf', C=1)
+        model = svm.SVC(kernel='rbf', C=1, gamma = 1)
         model.fit(E_train, y_train)
         y_predicted = model.predict(E_test)
+        accuracies.append(accuracy_score(y_test, y_predicted))
         print('On Embeddings:', accuracy_score(y_test, y_predicted))
+    print(np.max(accuracies), np.mean(accuracies), np.std(accuracies))
 
     ################## Estimate results: Classification Accuracy ########################
     print()
     for KERNEL in ['rbf', 'linear', 'poly']:
 
         if KERNEL == 'rbf':
-            sigma_grid = [0.1, 1, 10]
+            sigma_grid = [0.00001, 0.0001, 0.001, 0.1, 1, 10]
         else:
             sigma_grid = [1]
 
@@ -560,7 +507,7 @@ if __name__ == '__main__':
             sys.stdout.flush()
 
             # write kernel matrix and embeddings
-            gk.write_kernel_matrix('{}/{}/kernel_{}_{}.txt'.format(RESULTS_FOLDER, dataset, KERNEL, sigma_grid[s_ix]))
+            # gk.write_kernel_matrix('{}/{}/kernel_{}_{}.txt'.format(RESULTS_FOLDER, dataset, KERNEL, sigma_grid[s_ix]))
             # dump = np.load('{}/{}/kernel_{}_{}.txt.npz'.format(RESULTS_FOLDER, dataset, KERNEL, sigma_grid[s_ix]))
             # gk.K = dump['K']
 
@@ -590,5 +537,10 @@ if __name__ == '__main__':
         # except Exception as e:
         #     print('ERROR FOR', dataset, KERNEL, steps)
         #     raise e
+
+    label_suffix = ''
+    if graph_labels is not None:
+        label_suffix = '_' + graph_labels
+    shutil.rmtree(root + dataset + '_corpus{}'.format(label_suffix))
 
     console = []
