@@ -65,11 +65,6 @@ After running, you should get results in your host machine at awe/mutag_results 
 ### Citation
 If you use the code, please consider citing our work.
 ```
-
-
-
-
-
 @InProceedings{pmlr-v80-ivanov18a,
   title = 	 {Anonymous Walk Embeddings},
   author = 	 {Ivanov, Sergey and Burnaev, Evgeny},
@@ -83,5 +78,6 @@ If you use the code, please consider citing our work.
   month = 	 {10--15 Jul},
   publisher = 	 {PMLR},
   pdf = 	 {http://proceedings.mlr.press/v80/ivanov18a/ivanov18a.pdf},
-  url = 	 {http://proceedings.mlr.press/v80/ivanov18a.html},
+  url = 	 {http://proceedings.mlr.press/v80/ivanov18a.html}
+  }
 ```
