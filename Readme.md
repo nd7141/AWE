@@ -65,13 +65,23 @@ After running, you should get results in your host machine at awe/mutag_results 
 ### Citation
 If you use the code, please consider citing our work.
 ```
-@article{anonymouswalkembeddings
-  author    = {Sergey Ivanov and
-              Evgeny Burnaev},
-  title     = {Anonymous Walk Embeddings},
-  journal   = {CoRR},
-  volume    = {abs/1805.11921},
-  year      = {2018},
-  url       = {https://arxiv.org/abs/1805.11921}
-}
+
+
+
+
+
+@InProceedings{pmlr-v80-ivanov18a,
+  title = 	 {Anonymous Walk Embeddings},
+  author = 	 {Ivanov, Sergey and Burnaev, Evgeny},
+  booktitle = 	 {Proceedings of the 35th International Conference on Machine Learning},
+  pages = 	 {2191--2200},
+  year = 	 {2018},
+  editor = 	 {Dy, Jennifer and Krause, Andreas},
+  volume = 	 {80},
+  series = 	 {Proceedings of Machine Learning Research},
+  address = 	 {Stockholmsmässan, Stockholm Sweden},
+  month = 	 {10--15 Jul},
+  publisher = 	 {PMLR},
+  pdf = 	 {http://proceedings.mlr.press/v80/ivanov18a/ivanov18a.pdf},
+  url = 	 {http://proceedings.mlr.press/v80/ivanov18a.html},
 ```
